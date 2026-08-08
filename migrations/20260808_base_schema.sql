@@ -3,7 +3,7 @@
 -- Conventions:
 --   * uuid       -> TEXT (36-char canonical form), UNIQUE
 --   * json       -> TEXT validated with json_valid()
---   * timestamp  -> TEXT, ISO-8601 UTC ('YYYY-MM-DDTHH:MM:SS.SSSZ')
+--   * timestamp  -> INTEGER, Unix epoch seconds (UTC)
 --   * bool       -> INTEGER constrained to 0/1
 --
 -- NOTE: foreign_keys is a per-connection pragma, not a schema property.
@@ -11,8 +11,6 @@
 -- or the FK clauses below are inert.
 
 PRAGMA foreign_keys = ON;
-
-BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- feed
@@ -26,11 +24,12 @@ CREATE TABLE feed (
                              CHECK (json_valid(metadata)),
     refresh_interval INTEGER NOT NULL DEFAULT 3600
                              CHECK (refresh_interval > 0),
-    last_refresh     TEXT             DEFAULT NULL
+    last_refresh     INTEGER          DEFAULT NULL,
+    next_poll_at     INTEGER          DEFAULT NULL
 ) STRICT;
 
 -- Scheduler lookup: "which feeds are due for a refresh?"
-CREATE INDEX idx_feed_last_refresh ON feed (last_refresh);
+CREATE INDEX idx_feed_next_poll_at ON feed (next_poll_at);
 
 -- ---------------------------------------------------------------------------
 -- category (folder)
@@ -62,10 +61,11 @@ CREATE TABLE article (
     pk           INTEGER PRIMARY KEY AUTOINCREMENT,
     id           TEXT    NOT NULL UNIQUE,
     feed         INTEGER NOT NULL REFERENCES feed (pk) ON DELETE CASCADE,
+    url          TEXT    NOT NULL UNIQUE,
+    author       TEXT    NOT NULL DEFAULT '',
     content      TEXT    NOT NULL DEFAULT '',
-    published_at TEXT             DEFAULT NULL,
-    retrieved_at TEXT    NOT NULL
-                 DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    published_at INTEGER          DEFAULT NULL,
+    retrieved_at INTEGER NOT NULL DEFAULT (unixepoch())
 ) STRICT;
 
 -- Primary read path: a feed's articles, newest first.
@@ -80,8 +80,7 @@ CREATE TABLE article_state (
     article     INTEGER NOT NULL UNIQUE REFERENCES article (pk) ON DELETE CASCADE,
     is_read     INTEGER NOT NULL DEFAULT 0 CHECK (is_read    IN (0, 1)),
     is_starred  INTEGER NOT NULL DEFAULT 0 CHECK (is_starred IN (0, 1)),
-    modified_at TEXT    NOT NULL
-                DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    modified_at INTEGER NOT NULL DEFAULT (unixepoch())
 ) STRICT;
 
 -- Partial indexes: unread/starred sets are small relative to the table.
@@ -95,7 +94,7 @@ FOR EACH ROW
 WHEN NEW.modified_at = OLD.modified_at
 BEGIN
     UPDATE article_state
-       SET modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       SET modified_at = unixepoch()
      WHERE pk = NEW.pk;
 END;
 
@@ -119,5 +118,3 @@ CREATE TABLE article_label (
 ) STRICT;
 
 CREATE INDEX idx_article_label_label ON article_label (label);
-
-COMMIT;

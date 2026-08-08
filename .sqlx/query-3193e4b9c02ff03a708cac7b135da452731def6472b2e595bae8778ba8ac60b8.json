@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM article WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3193e4b9c02ff03a708cac7b135da452731def6472b2e595bae8778ba8ac60b8"
+}

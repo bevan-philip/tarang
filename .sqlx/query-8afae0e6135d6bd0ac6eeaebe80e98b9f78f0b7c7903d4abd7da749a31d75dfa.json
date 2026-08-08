@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM article_label WHERE article = ? AND label = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8afae0e6135d6bd0ac6eeaebe80e98b9f78f0b7c7903d4abd7da749a31d75dfa"
+}

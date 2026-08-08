@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO article (id, feed, url, content, author, published_at)\n           VALUES (?, ?, ?, ?, ?, ?)\n           ON CONFLICT(url) DO UPDATE SET\n               content      = excluded.content,\n               author       = excluded.author,\n               published_at = excluded.published_at,\n               retrieved_at = unixepoch()\n           RETURNING pk, id, feed, url, content, author, published_at, retrieved_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "feed",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "feed"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "name": "author",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "name": "published_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "name": "retrieved_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "retrieved_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f3e1c0119db3fb50f995ffa2efac5c16d1d58664183fca2f20823e03a6b6e59a"
+}

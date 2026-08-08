@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM label WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7d2e86177a7cb300fecefa3380f3e0d2da5ebf234fc5b5b86b8975282e5f9f5f"
+}

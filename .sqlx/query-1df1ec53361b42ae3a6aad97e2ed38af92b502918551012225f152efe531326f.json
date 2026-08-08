@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT article.pk, article.id, article.feed, article.url, article.content,\n                  article.author, article.published_at, article.retrieved_at\n           FROM article\n           JOIN article_label ON article_label.article = article.pk\n           WHERE article_label.label = ?\n           ORDER BY article.published_at DESC\n           LIMIT ? OFFSET ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "feed",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "feed"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "name": "author",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "name": "published_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "name": "retrieved_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "retrieved_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1df1ec53361b42ae3a6aad97e2ed38af92b502918551012225f152efe531326f"
+}

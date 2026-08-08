@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed SET last_refresh = ?, next_poll_at = ? WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a06bce8169696353ad8508e24e60d05c05aeee6d81966d7c8ce276764dc47fcb"
+}

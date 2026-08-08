@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO article_label (article, label) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6b1a6bceb15ea546ab0934cafb78d7407bb03bfdbfbfb9fb1d4d952b97ee16a1"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT label.pk, label.id, label.name\n           FROM label\n           JOIN article_label ON article_label.label = label.pk\n           WHERE article_label.article = ?\n           ORDER BY label.name",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "label",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "label",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "label",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "737463634f9717b42a1cad5b323352c53155d3ce6325d2aafbf022c6d86d2c78"
+}

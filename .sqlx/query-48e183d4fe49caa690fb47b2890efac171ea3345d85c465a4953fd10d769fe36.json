@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pk, article, is_read as \"is_read: bool\", is_starred as \"is_starred: bool\", modified_at\n           FROM article_state WHERE article = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "article",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "article"
+          }
+        }
+      },
+      {
+        "name": "is_read: bool",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "is_read"
+          }
+        }
+      },
+      {
+        "name": "is_starred: bool",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "is_starred"
+          }
+        }
+      },
+      {
+        "name": "modified_at",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "modified_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "48e183d4fe49caa690fb47b2890efac171ea3345d85c465a4953fd10d769fe36"
+}

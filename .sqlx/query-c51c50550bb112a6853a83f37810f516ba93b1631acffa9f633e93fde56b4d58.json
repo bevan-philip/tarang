@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at\n           FROM feed\n           WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "metadata",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "name": "refresh_interval",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "refresh_interval"
+          }
+        }
+      },
+      {
+        "name": "last_refresh",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_refresh"
+          }
+        }
+      },
+      {
+        "name": "next_poll_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "next_poll_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c51c50550bb112a6853a83f37810f516ba93b1631acffa9f633e93fde56b4d58"
+}

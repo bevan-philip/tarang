@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT feed.pk, feed.id, feed.name, feed.url, feed.metadata,\n                  feed.refresh_interval, feed.last_refresh, feed.next_poll_at\n           FROM feed\n           JOIN feed_category ON feed_category.feed = feed.pk\n           WHERE feed_category.category = ?\n           ORDER BY feed.name",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "metadata",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "name": "refresh_interval",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "refresh_interval"
+          }
+        }
+      },
+      {
+        "name": "last_refresh",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_refresh"
+          }
+        }
+      },
+      {
+        "name": "next_poll_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "next_poll_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c52fc6c7be9cec6108aea07000ffcd0fe0ff3d54eae46a6cf8efc6db3c47298b"
+}

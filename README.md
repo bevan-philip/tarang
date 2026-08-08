@@ -6,3 +6,12 @@ A headless RSS reader.
 - Arbitrary metadata on each entry: express the feeds in whatever manner you want. 
 - SQLite as the backing database.
 - Portable.
+
+## Running stuff
+### sqlx
+```bash
+cargo install sqlx-cli --no-default-features --features rustls,sqlite
+cargo sqlx database create
+cargo sqlx migrate run
+cargo sqlx prepare
+```

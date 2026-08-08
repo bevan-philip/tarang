@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT category.pk, category.id, category.name\n           FROM category\n           JOIN feed_category ON feed_category.category = category.pk\n           WHERE feed_category.feed = ?\n           ORDER BY category.name",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "category",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "category",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "category",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5158b50026b8eb3864cbf725b1bd75f4a1d5bc030e560f515ac9be6b41fde6e0"
+}
