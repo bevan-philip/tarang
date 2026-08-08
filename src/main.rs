@@ -1,35 +1,27 @@
-use feed_rs::parser;
-use std::error::Error;
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+};
+use serde::{Deserialize, Serialize};
 
 mod database;
+mod feed;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    scrape().await?;
-    Ok(())
+async fn main() {
+    let db = database::config().await.expect("failed to initialise db");
+
+    let app = Router::new().route("/health", get(health)).with_state(db);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+    println!("listening on http://127.0.0.1:3000");
+    axum::serve(listener, app).await.unwrap();
 }
 
-async fn scrape() -> Result<bool, Box<dyn Error>> {
-    let res = reqwest::get("https://bphilip.uk/index.xml")
-        .await?
-        .text()
-        .await?;
-
-    let _ = rss_parse(res);
-
-    Ok(true)
-}
-
-fn rss_parse(feed_content: String) -> Result<bool, Box<dyn Error>> {
-    let feed = parser::parse(feed_content.as_bytes())?;
-
-    for entry in feed.entries {
-        println!(
-            "{} at {}",
-            entry.title.ok_or("entry missing title")?.content,
-            entry.links[0].href
-        )
-    }
-
-    Ok(true)
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "status": "ok" }))
 }

@@ -1,8 +1,10 @@
+use chrono::Utc;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
+use sqlx::{QueryBuilder, Sqlite};
 use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
@@ -316,6 +318,13 @@ pub struct Article {
     pub retrieved_at: i64,
 }
 
+pub struct ParsedArticle {
+    pub url: String,
+    pub content: String,
+    pub author: String,
+    pub published_at: chrono::DateTime<Utc>,
+}
+
 pub async fn create_article(
     pool: &SqlitePool,
     feed_pk: i64,
@@ -347,6 +356,41 @@ pub async fn create_article(
     .await?;
 
     Ok(article)
+}
+
+pub async fn create_articles(
+    pool: &SqlitePool,
+    feed_pk: i64,
+    articles: &[ParsedArticle],
+) -> DbResult<Vec<Article>> {
+    if articles.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut qb: QueryBuilder<Sqlite> =
+        QueryBuilder::new("INSERT INTO article (id, feed, url, content, author, published_at) ");
+
+    qb.push_values(articles, |mut b, article| {
+        b.push_bind(Uuid::new_v4().to_string())
+            .push_bind(feed_pk)
+            .push_bind(&article.url)
+            .push_bind(&article.content)
+            .push_bind(&article.author)
+            .push_bind(article.published_at.timestamp());
+    });
+
+    qb.push(
+        r#" ON CONFLICT(url) DO UPDATE SET
+                content      = excluded.content,
+                author       = excluded.author,
+                published_at = excluded.published_at,
+                retrieved_at = unixepoch()
+            RETURNING pk, id, feed, url, content, author, published_at, retrieved_at"#,
+    );
+
+    let inserted = qb.build_query_as::<Article>().fetch_all(pool).await?;
+
+    Ok(inserted)
 }
 
 pub async fn get_article_by_id(pool: &SqlitePool, id: &str) -> DbResult<Option<Article>> {
