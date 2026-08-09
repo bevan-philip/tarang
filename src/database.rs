@@ -12,25 +12,41 @@ use uuid::Uuid;
 
 pub type DbResult<T> = Result<T, Box<dyn Error>>;
 
-pub async fn config() -> DbResult<SqlitePool> {
-    let opts = SqliteConnectOptions::from_str("sqlite://app.db")?
-        .create_if_missing(true)
+#[derive(Clone)]
+pub struct Db {
+    pub read: SqlitePool,
+    pub write: SqlitePool,
+}
+
+pub async fn config() -> DbResult<Db> {
+    let base_opts = SqliteConnectOptions::from_str("sqlite://app.db")?
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .foreign_keys(true)
         .busy_timeout(Duration::from_secs(5))
         .pragma("cache_size", "-20000")
-        .pragma("temp_store", "MEMORY")
+        .pragma("temp_store", "MEMORY");
+
+    let write_opts = base_opts
+        .clone()
+        .create_if_missing(true)
         .optimize_on_close(true, None);
 
-    let pool = SqlitePoolOptions::new()
-        .max_connections(8)
-        .connect_with(opts)
+    let write = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(write_opts)
         .await?;
 
-    sqlx::migrate!().run(&pool).await?;
+    sqlx::migrate!().run(&write).await?;
 
-    Ok(pool)
+    let read_opts = base_opts.read_only(true);
+
+    let read = SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(read_opts)
+        .await?;
+
+    Ok(Db { read, write })
 }
 
 // -----------------------------------------------------------------------
@@ -50,7 +66,7 @@ pub struct Feed {
 }
 
 pub async fn create_feed(
-    pool: &SqlitePool,
+    db: &Db,
     name: &str,
     url: &str,
     metadata: Option<&str>,
@@ -71,78 +87,78 @@ pub async fn create_feed(
         metadata,
         refresh_interval,
     )
-    .fetch_one(pool)
+    .fetch_one(&db.write)
     .await?;
 
     Ok(feed)
 }
 
-pub async fn get_feed_by_id(pool: &SqlitePool, id: &str) -> DbResult<Option<Feed>> {
+pub async fn get_feed_by_id(db: &Db, id: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
         r#"SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed WHERE id = ?"#,
         id,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&db.read)
     .await?;
 
     Ok(feed)
 }
 
-pub async fn get_feed_by_pk(pool: &SqlitePool, pk: i64) -> DbResult<Option<Feed>> {
+pub async fn get_feed_by_pk(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
         r#"SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed WHERE pk = ?"#,
         pk,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&db.read)
     .await?;
 
     Ok(feed)
 }
 
-pub async fn get_feed_by_url(pool: &SqlitePool, url: &str) -> DbResult<Option<Feed>> {
+pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
         r#"SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed WHERE url = ?"#,
         url,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&db.read)
     .await?;
 
     Ok(feed)
 }
 
-pub async fn list_feeds(pool: &SqlitePool) -> DbResult<Vec<Feed>> {
+pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
         r#"SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed ORDER BY name"#,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(feeds)
 }
 
-pub async fn list_feeds_due_for_refresh(pool: &SqlitePool) -> DbResult<Vec<Feed>> {
+pub async fn list_feeds_due_for_refresh(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
         r#"SELECT pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed
            WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()"#,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(feeds)
 }
 
 pub async fn update_feed_last_refresh(
-    pool: &SqlitePool,
+    db: &Db,
     pk: i64,
     last_refresh: i64,
     next_poll_at: i64,
@@ -153,23 +169,23 @@ pub async fn update_feed_last_refresh(
         next_poll_at,
         pk
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn update_feed_metadata(pool: &SqlitePool, pk: i64, metadata: &str) -> DbResult<()> {
+pub async fn update_feed_metadata(db: &Db, pk: i64, metadata: &str) -> DbResult<()> {
     sqlx::query!("UPDATE feed SET metadata = ? WHERE pk = ?", metadata, pk)
-        .execute(pool)
+        .execute(&db.write)
         .await?;
 
     Ok(())
 }
 
-pub async fn delete_feed(pool: &SqlitePool, pk: i64) -> DbResult<()> {
+pub async fn delete_feed(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM feed WHERE pk = ?", pk)
-        .execute(pool)
+        .execute(&db.write)
         .await?;
 
     Ok(())
@@ -186,7 +202,7 @@ pub struct Category {
     pub name: String,
 }
 
-pub async fn create_category(pool: &SqlitePool, name: &str) -> DbResult<Category> {
+pub async fn create_category(db: &Db, name: &str) -> DbResult<Category> {
     let id = Uuid::new_v4().to_string();
 
     let category = sqlx::query_as!(
@@ -196,38 +212,38 @@ pub async fn create_category(pool: &SqlitePool, name: &str) -> DbResult<Category
         id,
         name,
     )
-    .fetch_one(pool)
+    .fetch_one(&db.write)
     .await?;
 
     Ok(category)
 }
 
-pub async fn get_category_by_id(pool: &SqlitePool, id: &str) -> DbResult<Option<Category>> {
+pub async fn get_category_by_id(db: &Db, id: &str) -> DbResult<Option<Category>> {
     let category = sqlx::query_as!(
         Category,
         r#"SELECT pk, id, name FROM category WHERE id = ?"#,
         id,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&db.read)
     .await?;
 
     Ok(category)
 }
 
-pub async fn list_categories(pool: &SqlitePool) -> DbResult<Vec<Category>> {
+pub async fn list_categories(db: &Db) -> DbResult<Vec<Category>> {
     let categories = sqlx::query_as!(
         Category,
         r#"SELECT pk, id, name FROM category ORDER BY name"#
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(categories)
 }
 
-pub async fn delete_category(pool: &SqlitePool, pk: i64) -> DbResult<()> {
+pub async fn delete_category(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM category WHERE pk = ?", pk)
-        .execute(pool)
+        .execute(&db.write)
         .await?;
 
     Ok(())
@@ -237,39 +253,31 @@ pub async fn delete_category(pool: &SqlitePool, pk: i64) -> DbResult<()> {
 // feed_category
 // -----------------------------------------------------------------------
 
-pub async fn add_feed_to_category(
-    pool: &SqlitePool,
-    feed_pk: i64,
-    category_pk: i64,
-) -> DbResult<()> {
+pub async fn add_feed_to_category(db: &Db, feed_pk: i64, category_pk: i64) -> DbResult<()> {
     sqlx::query!(
         "INSERT OR IGNORE INTO feed_category (feed, category) VALUES (?, ?)",
         feed_pk,
         category_pk,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn remove_feed_from_category(
-    pool: &SqlitePool,
-    feed_pk: i64,
-    category_pk: i64,
-) -> DbResult<()> {
+pub async fn remove_feed_from_category(db: &Db, feed_pk: i64, category_pk: i64) -> DbResult<()> {
     sqlx::query!(
         "DELETE FROM feed_category WHERE feed = ? AND category = ?",
         feed_pk,
         category_pk,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn list_categories_for_feed(pool: &SqlitePool, feed_pk: i64) -> DbResult<Vec<Category>> {
+pub async fn list_categories_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<Category>> {
     let categories = sqlx::query_as!(
         Category,
         r#"SELECT category.pk, category.id, category.name
@@ -279,13 +287,13 @@ pub async fn list_categories_for_feed(pool: &SqlitePool, feed_pk: i64) -> DbResu
            ORDER BY category.name"#,
         feed_pk,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(categories)
 }
 
-pub async fn list_feeds_for_category(pool: &SqlitePool, category_pk: i64) -> DbResult<Vec<Feed>> {
+pub async fn list_feeds_for_category(db: &Db, category_pk: i64) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
         r#"SELECT feed.pk, feed.id, feed.name, feed.url, feed.metadata,
@@ -296,7 +304,7 @@ pub async fn list_feeds_for_category(pool: &SqlitePool, category_pk: i64) -> DbR
            ORDER BY feed.name"#,
         category_pk,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(feeds)
@@ -326,7 +334,7 @@ pub struct ParsedArticle {
 }
 
 pub async fn create_article(
-    pool: &SqlitePool,
+    db: &Db,
     feed_pk: i64,
     url: &str,
     content: &str,
@@ -352,14 +360,14 @@ pub async fn create_article(
         author,
         published_at,
     )
-    .fetch_one(pool)
+    .fetch_one(&db.write)
     .await?;
 
     Ok(article)
 }
 
 pub async fn create_articles(
-    pool: &SqlitePool,
+    db: &Db,
     feed_pk: i64,
     articles: &[ParsedArticle],
 ) -> DbResult<Vec<Article>> {
@@ -388,26 +396,26 @@ pub async fn create_articles(
             RETURNING pk, id, feed, url, content, author, published_at, retrieved_at"#,
     );
 
-    let inserted = qb.build_query_as::<Article>().fetch_all(pool).await?;
+    let inserted = qb.build_query_as::<Article>().fetch_all(&db.write).await?;
 
     Ok(inserted)
 }
 
-pub async fn get_article_by_id(pool: &SqlitePool, id: &str) -> DbResult<Option<Article>> {
+pub async fn get_article_by_id(db: &Db, id: &str) -> DbResult<Option<Article>> {
     let article = sqlx::query_as!(
         Article,
         r#"SELECT pk, id, feed, url, content, author, published_at, retrieved_at
            FROM article WHERE id = ?"#,
         id,
     )
-    .fetch_optional(pool)
+    .fetch_optional(&db.read)
     .await?;
 
     Ok(article)
 }
 
 pub async fn list_articles_for_feed(
-    pool: &SqlitePool,
+    db: &Db,
     feed_pk: i64,
     limit: i64,
     offset: i64,
@@ -423,17 +431,13 @@ pub async fn list_articles_for_feed(
         limit,
         offset,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(articles)
 }
 
-pub async fn list_recent_articles(
-    pool: &SqlitePool,
-    limit: i64,
-    offset: i64,
-) -> DbResult<Vec<Article>> {
+pub async fn list_recent_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
         r#"SELECT pk, id, feed, url, content, author, published_at, retrieved_at
@@ -443,15 +447,15 @@ pub async fn list_recent_articles(
         limit,
         offset,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(articles)
 }
 
-pub async fn delete_article(pool: &SqlitePool, pk: i64) -> DbResult<()> {
+pub async fn delete_article(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM article WHERE pk = ?", pk)
-        .execute(pool)
+        .execute(&db.write)
         .await?;
 
     Ok(())
@@ -470,15 +474,12 @@ pub struct ArticleState {
     pub modified_at: i64,
 }
 
-pub async fn get_or_create_article_state(
-    pool: &SqlitePool,
-    article_pk: i64,
-) -> DbResult<ArticleState> {
+pub async fn get_or_create_article_state(db: &Db, article_pk: i64) -> DbResult<ArticleState> {
     sqlx::query!(
         "INSERT INTO article_state (article) VALUES (?) ON CONFLICT(article) DO NOTHING",
         article_pk,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     let state = sqlx::query_as!(
@@ -487,47 +488,39 @@ pub async fn get_or_create_article_state(
            FROM article_state WHERE article = ?"#,
         article_pk,
     )
-    .fetch_one(pool)
+    .fetch_one(&db.write)
     .await?;
 
     Ok(state)
 }
 
-pub async fn set_article_read(pool: &SqlitePool, article_pk: i64, is_read: bool) -> DbResult<()> {
+pub async fn set_article_read(db: &Db, article_pk: i64, is_read: bool) -> DbResult<()> {
     sqlx::query!(
         r#"INSERT INTO article_state (article, is_read) VALUES (?, ?)
            ON CONFLICT(article) DO UPDATE SET is_read = excluded.is_read"#,
         article_pk,
         is_read,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn set_article_starred(
-    pool: &SqlitePool,
-    article_pk: i64,
-    is_starred: bool,
-) -> DbResult<()> {
+pub async fn set_article_starred(db: &Db, article_pk: i64, is_starred: bool) -> DbResult<()> {
     sqlx::query!(
         r#"INSERT INTO article_state (article, is_starred) VALUES (?, ?)
            ON CONFLICT(article) DO UPDATE SET is_starred = excluded.is_starred"#,
         article_pk,
         is_starred,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn list_unread_articles(
-    pool: &SqlitePool,
-    limit: i64,
-    offset: i64,
-) -> DbResult<Vec<Article>> {
+pub async fn list_unread_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
         r#"SELECT article.pk, article.id, article.feed, article.url, article.content,
@@ -540,17 +533,13 @@ pub async fn list_unread_articles(
         limit,
         offset,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(articles)
 }
 
-pub async fn list_starred_articles(
-    pool: &SqlitePool,
-    limit: i64,
-    offset: i64,
-) -> DbResult<Vec<Article>> {
+pub async fn list_starred_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
         r#"SELECT article.pk, article.id, article.feed, article.url, article.content,
@@ -563,7 +552,7 @@ pub async fn list_starred_articles(
         limit,
         offset,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(articles)
@@ -580,7 +569,7 @@ pub struct Label {
     pub name: String,
 }
 
-pub async fn create_label(pool: &SqlitePool, name: &str) -> DbResult<Label> {
+pub async fn create_label(db: &Db, name: &str) -> DbResult<Label> {
     let id = Uuid::new_v4().to_string();
 
     let label = sqlx::query_as!(
@@ -590,31 +579,31 @@ pub async fn create_label(pool: &SqlitePool, name: &str) -> DbResult<Label> {
         id,
         name,
     )
-    .fetch_one(pool)
+    .fetch_one(&db.write)
     .await?;
 
     Ok(label)
 }
 
-pub async fn get_label_by_id(pool: &SqlitePool, id: &str) -> DbResult<Option<Label>> {
+pub async fn get_label_by_id(db: &Db, id: &str) -> DbResult<Option<Label>> {
     let label = sqlx::query_as!(Label, r#"SELECT pk, id, name FROM label WHERE id = ?"#, id)
-        .fetch_optional(pool)
+        .fetch_optional(&db.read)
         .await?;
 
     Ok(label)
 }
 
-pub async fn list_labels(pool: &SqlitePool) -> DbResult<Vec<Label>> {
+pub async fn list_labels(db: &Db) -> DbResult<Vec<Label>> {
     let labels = sqlx::query_as!(Label, r#"SELECT pk, id, name FROM label ORDER BY name"#)
-        .fetch_all(pool)
+        .fetch_all(&db.read)
         .await?;
 
     Ok(labels)
 }
 
-pub async fn delete_label(pool: &SqlitePool, pk: i64) -> DbResult<()> {
+pub async fn delete_label(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM label WHERE pk = ?", pk)
-        .execute(pool)
+        .execute(&db.write)
         .await?;
 
     Ok(())
@@ -624,39 +613,31 @@ pub async fn delete_label(pool: &SqlitePool, pk: i64) -> DbResult<()> {
 // article_label
 // -----------------------------------------------------------------------
 
-pub async fn add_label_to_article(
-    pool: &SqlitePool,
-    article_pk: i64,
-    label_pk: i64,
-) -> DbResult<()> {
+pub async fn add_label_to_article(db: &Db, article_pk: i64, label_pk: i64) -> DbResult<()> {
     sqlx::query!(
         "INSERT OR IGNORE INTO article_label (article, label) VALUES (?, ?)",
         article_pk,
         label_pk,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn remove_label_from_article(
-    pool: &SqlitePool,
-    article_pk: i64,
-    label_pk: i64,
-) -> DbResult<()> {
+pub async fn remove_label_from_article(db: &Db, article_pk: i64, label_pk: i64) -> DbResult<()> {
     sqlx::query!(
         "DELETE FROM article_label WHERE article = ? AND label = ?",
         article_pk,
         label_pk,
     )
-    .execute(pool)
+    .execute(&db.write)
     .await?;
 
     Ok(())
 }
 
-pub async fn list_labels_for_article(pool: &SqlitePool, article_pk: i64) -> DbResult<Vec<Label>> {
+pub async fn list_labels_for_article(db: &Db, article_pk: i64) -> DbResult<Vec<Label>> {
     let labels = sqlx::query_as!(
         Label,
         r#"SELECT label.pk, label.id, label.name
@@ -666,14 +647,14 @@ pub async fn list_labels_for_article(pool: &SqlitePool, article_pk: i64) -> DbRe
            ORDER BY label.name"#,
         article_pk,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(labels)
 }
 
 pub async fn list_articles_for_label(
-    pool: &SqlitePool,
+    db: &Db,
     label_pk: i64,
     limit: i64,
     offset: i64,
@@ -691,7 +672,7 @@ pub async fn list_articles_for_label(
         limit,
         offset,
     )
-    .fetch_all(pool)
+    .fetch_all(&db.read)
     .await?;
 
     Ok(articles)

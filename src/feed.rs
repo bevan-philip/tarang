@@ -1,13 +1,13 @@
 use crate::database;
 use crate::database::Article;
+use crate::database::Db;
 use crate::database::ParsedArticle;
 
 use feed_rs::{model::Entry, model::Feed, parser};
-use sqlx::sqlite::SqlitePool;
 use std::error::Error;
 
 async fn update_feed_articles(
-    db: &SqlitePool,
+    db: &Db,
     feed_pk: i64,
     feed_url: String,
 ) -> Result<Vec<Article>, Box<dyn Error>> {
