@@ -7,6 +7,7 @@ edition = "2024"
 axum = "0.8.9"
 chrono = "0.4.45"
 feed-rs = "2.4.0"
+futures = "0.3.33"
 jiff = "0.2.35"
 reqwest = "0.13.4"
 serde = { version = "1.0.229", features = ["derive"] }

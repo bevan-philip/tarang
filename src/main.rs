@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 mod database;
 mod feed;
+mod sync;
 
 #[tokio::main]
 async fn main() {

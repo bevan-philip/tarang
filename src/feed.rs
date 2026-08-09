@@ -6,7 +6,7 @@ use crate::database::ParsedArticle;
 use feed_rs::{model::Entry, model::Feed, parser};
 use std::error::Error;
 
-async fn update_feed_articles(
+pub async fn update_feed_articles(
     db: &Db,
     feed_pk: i64,
     feed_url: String,
