@@ -10,7 +10,7 @@ pub async fn update_feed_articles(
     db: &Db,
     feed_pk: i64,
     feed_url: String,
-) -> Result<Vec<Article>, Box<dyn Error>> {
+) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let res = reqwest::get(feed_url).await?.text().await?;
     let feed = parser::parse(res.as_bytes())?;
     let articles = process_feed(feed).await?;
@@ -19,7 +19,7 @@ pub async fn update_feed_articles(
     Ok(db_entries)
 }
 
-async fn process_feed(feed: Feed) -> Result<Vec<ParsedArticle>, Box<dyn Error>> {
+async fn process_feed(feed: Feed) -> Result<Vec<ParsedArticle>, Box<dyn Error + Send + Sync>> {
     let mut v: Vec<ParsedArticle> = Vec::new();
 
     for entry in feed.entries {
@@ -29,7 +29,7 @@ async fn process_feed(feed: Feed) -> Result<Vec<ParsedArticle>, Box<dyn Error>> 
     Ok(v)
 }
 
-async fn create_parsed_article(entry: Entry) -> Result<ParsedArticle, Box<dyn Error>> {
+async fn create_parsed_article(entry: Entry) -> Result<ParsedArticle, Box<dyn Error + Send + Sync>> {
     Ok(ParsedArticle {
         author: entry.authors.first().ok_or("no author")?.name.clone(),
         content: entry

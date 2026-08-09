@@ -3,7 +3,7 @@ use crate::feed::update_feed_articles;
 use futures::stream::{self, StreamExt};
 use std::error::Error;
 
-async fn sync_feed(db: &Db) -> Result<(), Box<dyn Error>> {
+pub async fn sync_feeds(db: &Db) -> Result<(), Box<dyn Error + Send + Sync>> {
     let feeds = list_feeds_due_for_refresh(db).await?;
 
     stream::iter(feeds)

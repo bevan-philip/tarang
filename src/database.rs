@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
 
-pub type DbResult<T> = Result<T, Box<dyn Error>>;
+pub type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Clone)]
 pub struct Db {
