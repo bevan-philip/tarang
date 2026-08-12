@@ -321,16 +321,20 @@ pub struct Article {
     pub id: String,
     pub feed: i64,
     pub url: String,
-    pub author: String,
+    pub guid: String,
+    pub title: Option<String>,
     pub content: String,
+    pub summary: Option<String>,
     pub published_at: Option<i64>,
     pub retrieved_at: i64,
 }
 
 pub struct ParsedArticle {
     pub url: String,
+    pub guid: String,
+    pub title: Option<String>,
     pub content: String,
-    pub author: String,
+    pub summary: Option<String>,
     pub published_at: chrono::DateTime<Utc>,
 }
 
@@ -338,27 +342,33 @@ pub async fn create_article(
     db: &Db,
     feed_pk: i64,
     url: &str,
+    guid: &str,
+    title: Option<&str>,
     content: &str,
-    author: &str,
+    summary: Option<&str>,
     published_at: Option<i64>,
 ) -> DbResult<Article> {
     let id = Uuid::new_v4().to_string();
 
     let article = sqlx::query_as!(
         Article,
-        r#"INSERT INTO article (id, feed, url, content, author, published_at)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(url) DO UPDATE SET
+        r#"INSERT INTO article (id, feed, url, guid, title, content, summary, published_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(guid) DO UPDATE SET
+               url          = excluded.url,
+               title        = excluded.title,
                content      = excluded.content,
-               author       = excluded.author,
+               summary      = excluded.summary,
                published_at = excluded.published_at,
                retrieved_at = unixepoch()
-           RETURNING pk, id, feed, url, content, author, published_at, retrieved_at"#,
+           RETURNING pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at"#,
         id,
         feed_pk,
         url,
+        guid,
+        title,
         content,
-        author,
+        summary,
         published_at,
     )
     .fetch_one(&db.write)
@@ -376,25 +386,30 @@ pub async fn create_articles(
         return Ok(Vec::new());
     }
 
-    let mut qb: QueryBuilder<Sqlite> =
-        QueryBuilder::new("INSERT INTO article (id, feed, url, content, author, published_at) ");
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "INSERT INTO article (id, feed, url, guid, title, content, summary, published_at) ",
+    );
 
     qb.push_values(articles, |mut b, article| {
         b.push_bind(Uuid::new_v4().to_string())
             .push_bind(feed_pk)
             .push_bind(&article.url)
+            .push_bind(&article.guid)
+            .push_bind(&article.title)
             .push_bind(&article.content)
-            .push_bind(&article.author)
+            .push_bind(&article.summary)
             .push_bind(article.published_at.timestamp());
     });
 
     qb.push(
-        r#" ON CONFLICT(url) DO UPDATE SET
+        r#" ON CONFLICT(guid) DO UPDATE SET
+                url          = excluded.url,
+                title        = excluded.title,
                 content      = excluded.content,
-                author       = excluded.author,
+                summary      = excluded.summary,
                 published_at = excluded.published_at,
                 retrieved_at = unixepoch()
-            RETURNING pk, id, feed, url, content, author, published_at, retrieved_at"#,
+            RETURNING pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at"#,
     );
 
     let inserted = qb.build_query_as::<Article>().fetch_all(&db.write).await?;
@@ -405,7 +420,7 @@ pub async fn create_articles(
 pub async fn get_article_by_id(db: &Db, id: &str) -> DbResult<Option<Article>> {
     let article = sqlx::query_as!(
         Article,
-        r#"SELECT pk, id, feed, url, content, author, published_at, retrieved_at
+        r#"SELECT pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at
            FROM article WHERE id = ?"#,
         id,
     )
@@ -423,7 +438,7 @@ pub async fn list_articles_for_feed(
 ) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
-        r#"SELECT pk, id, feed, url, content, author, published_at, retrieved_at
+        r#"SELECT pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at
            FROM article
            WHERE feed = ?
            ORDER BY published_at DESC
@@ -441,7 +456,7 @@ pub async fn list_articles_for_feed(
 pub async fn list_recent_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
-        r#"SELECT pk, id, feed, url, content, author, published_at, retrieved_at
+        r#"SELECT pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at
            FROM article
            ORDER BY published_at DESC
            LIMIT ? OFFSET ?"#,
@@ -524,8 +539,9 @@ pub async fn set_article_starred(db: &Db, article_pk: i64, is_starred: bool) -> 
 pub async fn list_unread_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
-        r#"SELECT article.pk, article.id, article.feed, article.url, article.content,
-                  article.author, article.published_at, article.retrieved_at
+        r#"SELECT article.pk, article.id, article.feed, article.url, article.guid,
+                  article.title, article.content, article.summary,
+                  article.published_at, article.retrieved_at
            FROM article
            LEFT JOIN article_state ON article_state.article = article.pk
            WHERE article_state.is_read IS NULL OR article_state.is_read = 0
@@ -543,8 +559,9 @@ pub async fn list_unread_articles(db: &Db, limit: i64, offset: i64) -> DbResult<
 pub async fn list_starred_articles(db: &Db, limit: i64, offset: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
-        r#"SELECT article.pk, article.id, article.feed, article.url, article.content,
-                  article.author, article.published_at, article.retrieved_at
+        r#"SELECT article.pk, article.id, article.feed, article.url, article.guid,
+                  article.title, article.content, article.summary,
+                  article.published_at, article.retrieved_at
            FROM article
            JOIN article_state ON article_state.article = article.pk
            WHERE article_state.is_starred = 1
@@ -662,8 +679,9 @@ pub async fn list_articles_for_label(
 ) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
-        r#"SELECT article.pk, article.id, article.feed, article.url, article.content,
-                  article.author, article.published_at, article.retrieved_at
+        r#"SELECT article.pk, article.id, article.feed, article.url, article.guid,
+                  article.title, article.content, article.summary,
+                  article.published_at, article.retrieved_at
            FROM article
            JOIN article_label ON article_label.article = article.pk
            WHERE article_label.label = ?

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, id, feed, url, content, author, published_at, retrieved_at\n           FROM article WHERE id = ?",
+  "query": "SELECT pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at\n           FROM article\n           ORDER BY published_at DESC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,30 @@
         }
       },
       {
-        "name": "content",
+        "name": "guid",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "guid"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,19 +81,19 @@
         }
       },
       {
-        "name": "author",
-        "ordinal": 5,
+        "name": "summary",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "article",
-            "name": "author"
+            "name": "summary"
           }
         }
       },
       {
         "name": "published_at",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "retrieved_at",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false,
@@ -101,10 +123,12 @@
       false,
       false,
       false,
+      true,
       false,
+      true,
       true,
       false
     ]
   },
-  "hash": "c82271735668337b6f2c9c9385b6d1b10db37a2ebe9fdfc391c8dba7d7edff26"
+  "hash": "0f47d22c108f5b8f7c1a100892270fb69c20a40b3694663f6ac5ac8c7b9eac7f"
 }

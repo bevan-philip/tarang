@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT article.pk, article.id, article.feed, article.url, article.content,\n                  article.author, article.published_at, article.retrieved_at\n           FROM article\n           LEFT JOIN article_state ON article_state.article = article.pk\n           WHERE article_state.is_read IS NULL OR article_state.is_read = 0\n           ORDER BY article.published_at DESC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT article.pk, article.id, article.feed, article.url, article.guid,\n                  article.title, article.content, article.summary,\n                  article.published_at, article.retrieved_at\n           FROM article\n           JOIN article_state ON article_state.article = article.pk\n           WHERE article_state.is_starred = 1\n           ORDER BY article.published_at DESC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,30 @@
         }
       },
       {
-        "name": "content",
+        "name": "guid",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "guid"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,19 +81,19 @@
         }
       },
       {
-        "name": "author",
-        "ordinal": 5,
+        "name": "summary",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "article",
-            "name": "author"
+            "name": "summary"
           }
         }
       },
       {
         "name": "published_at",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "retrieved_at",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -101,10 +123,12 @@
       false,
       false,
       false,
+      true,
       false,
+      true,
       true,
       false
     ]
   },
-  "hash": "dbd5e0965d98186e4199cfd47a84ad78c04c3e14bd71f4f2711788874d8c8c01"
+  "hash": "531da78ce0f5d97ce971a9d8860e1fc3855d2415d58ba7625fce1a3286df660e"
 }

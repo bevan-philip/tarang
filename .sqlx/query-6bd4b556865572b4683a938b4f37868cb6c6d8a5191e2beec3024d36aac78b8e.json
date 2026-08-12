@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO article (id, feed, url, content, author, published_at)\n           VALUES (?, ?, ?, ?, ?, ?)\n           ON CONFLICT(url) DO UPDATE SET\n               content      = excluded.content,\n               author       = excluded.author,\n               published_at = excluded.published_at,\n               retrieved_at = unixepoch()\n           RETURNING pk, id, feed, url, content, author, published_at, retrieved_at",
+  "query": "INSERT INTO article (id, feed, url, guid, title, content, summary, published_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n           ON CONFLICT(guid) DO UPDATE SET\n               url          = excluded.url,\n               title        = excluded.title,\n               content      = excluded.content,\n               summary      = excluded.summary,\n               published_at = excluded.published_at,\n               retrieved_at = unixepoch()\n           RETURNING pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,30 @@
         }
       },
       {
-        "name": "content",
+        "name": "guid",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "guid"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,19 +81,19 @@
         }
       },
       {
-        "name": "author",
-        "ordinal": 5,
+        "name": "summary",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "article",
-            "name": "author"
+            "name": "summary"
           }
         }
       },
       {
         "name": "published_at",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "retrieved_at",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 8
     },
     "nullable": [
       false,
@@ -101,10 +123,12 @@
       false,
       false,
       false,
+      true,
       false,
+      true,
       true,
       false
     ]
   },
-  "hash": "f3e1c0119db3fb50f995ffa2efac5c16d1d58664183fca2f20823e03a6b6e59a"
+  "hash": "6bd4b556865572b4683a938b4f37868cb6c6d8a5191e2beec3024d36aac78b8e"
 }

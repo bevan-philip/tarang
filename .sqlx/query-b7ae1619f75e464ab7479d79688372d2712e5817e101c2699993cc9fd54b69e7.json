@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT article.pk, article.id, article.feed, article.url, article.content,\n                  article.author, article.published_at, article.retrieved_at\n           FROM article\n           JOIN article_label ON article_label.article = article.pk\n           WHERE article_label.label = ?\n           ORDER BY article.published_at DESC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT pk, id, feed, url, guid, title, content, summary, published_at, retrieved_at\n           FROM article\n           WHERE feed = ?\n           ORDER BY published_at DESC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,30 @@
         }
       },
       {
-        "name": "content",
+        "name": "guid",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "guid"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,19 +81,19 @@
         }
       },
       {
-        "name": "author",
-        "ordinal": 5,
+        "name": "summary",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "article",
-            "name": "author"
+            "name": "summary"
           }
         }
       },
       {
         "name": "published_at",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "retrieved_at",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -101,10 +123,12 @@
       false,
       false,
       false,
+      true,
       false,
+      true,
       true,
       false
     ]
   },
-  "hash": "1df1ec53361b42ae3a6aad97e2ed38af92b502918551012225f152efe531326f"
+  "hash": "b7ae1619f75e464ab7479d79688372d2712e5817e101c2699993cc9fd54b69e7"
 }
