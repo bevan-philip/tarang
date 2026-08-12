@@ -1,5 +1,6 @@
+use crate::api::{get_initial_state, health};
 use axum::{
-    Json, Router,
+    Router,
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
@@ -7,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+mod api;
 mod database;
 mod feed;
 mod sync;
@@ -27,7 +29,10 @@ async fn main() {
         }
     });
 
-    let app = Router::new().route("/health", get(health)).with_state(db);
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/tarang/v1/initialState", get(get_initial_state))
+        .with_state(db);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -35,8 +40,4 @@ async fn main() {
 
     println!("listening on http://127.0.0.1:3000");
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok" }))
 }

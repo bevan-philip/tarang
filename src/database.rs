@@ -1,4 +1,5 @@
 use chrono::Utc;
+use serde::Serialize;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePool;
@@ -53,7 +54,7 @@ pub async fn config() -> DbResult<Db> {
 // feed
 // -----------------------------------------------------------------------
 
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Feed {
     pub pk: i64,
     pub id: String,
@@ -314,7 +315,7 @@ pub async fn list_feeds_for_category(db: &Db, category_pk: i64) -> DbResult<Vec<
 // article
 // -----------------------------------------------------------------------
 
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Article {
     pub pk: i64,
     pub id: String,
