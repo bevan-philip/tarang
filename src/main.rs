@@ -1,4 +1,4 @@
-use crate::api::{get_initial_state, health};
+use crate::api::{add_feed, get_initial_state, health};
 use axum::{
     Router,
     extract::{Path, State},
@@ -32,6 +32,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/tarang/v1/initialState", get(get_initial_state))
+        .route("/tarang/v1/addFeed", post(add_feed))
         .with_state(db);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
