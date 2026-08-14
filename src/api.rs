@@ -20,17 +20,6 @@ pub struct InitialState {
     articles: Vec<Article>,
 }
 
-#[derive(Deserialize)]
-pub struct AddSite {
-    name: String,
-    url: String,
-    metadata: Option<String>,
-    refresh_interval: Option<i64>,
-}
-
-/**
- * Getting the initial state to build up your web app.
- */
 pub async fn get_initial_state(
     State(db): State<Db>,
 ) -> Result<Json<Vec<InitialState>>, StatusCode> {
@@ -46,6 +35,14 @@ pub async fn get_initial_state(
     }
 
     Ok(Json(feed_with_articles))
+}
+
+#[derive(Deserialize)]
+pub struct AddSite {
+    name: String,
+    url: String,
+    metadata: Option<String>,
+    refresh_interval: Option<i64>,
 }
 
 pub async fn add_feed(
