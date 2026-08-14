@@ -8,10 +8,14 @@ use std::str::FromStr;
 use std::time::Duration;
 
 mod article;
+mod category;
 mod feed;
+mod feed_category;
 
 pub use article::*;
+pub use category::*;
 pub use feed::*;
+pub use feed_category::*;
 
 pub type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
