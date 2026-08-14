@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT feed.pk, feed.id, feed.name, feed.url, feed.metadata,\n                  feed.refresh_interval, feed.last_refresh, feed.next_poll_at\n           FROM feed\n           JOIN feed_category ON feed_category.feed = feed.pk\n           WHERE feed_category.category = ?\n           ORDER BY feed.name",
+  "query": "SELECT pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at\n           FROM feed\n           WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()",
   "describe": {
     "columns": [
       {
@@ -15,19 +15,8 @@
         }
       },
       {
-        "name": "id",
-        "ordinal": 1,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "feed",
-            "name": "id"
-          }
-        }
-      },
-      {
         "name": "name",
-        "ordinal": 2,
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +27,7 @@
       },
       {
         "name": "url",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +38,7 @@
       },
       {
         "name": "metadata",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +49,7 @@
       },
       {
         "name": "refresh_interval",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +60,7 @@
       },
       {
         "name": "last_refresh",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +71,7 @@
       },
       {
         "name": "next_poll_at",
-        "ordinal": 7,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,10 +82,9 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
-      false,
       false,
       false,
       false,
@@ -106,5 +94,5 @@
       true
     ]
   },
-  "hash": "c52fc6c7be9cec6108aea07000ffcd0fe0ff3d54eae46a6cf8efc6db3c47298b"
+  "hash": "75ac51b3ee7efd9b606effe92e98c4424564d7a7bb9141247d6828b6a782579a"
 }

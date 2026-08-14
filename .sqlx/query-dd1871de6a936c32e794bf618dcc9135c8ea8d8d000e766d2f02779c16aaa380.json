@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO feed (id, name, url, metadata, refresh_interval)\n           VALUES (?, ?, ?, ?, ?)\n           RETURNING pk, id, name, url, metadata, refresh_interval, last_refresh, next_poll_at",
+  "query": "SELECT pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at\n           FROM feed ORDER BY name",
   "describe": {
     "columns": [
       {
@@ -15,19 +15,8 @@
         }
       },
       {
-        "name": "id",
-        "ordinal": 1,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "feed",
-            "name": "id"
-          }
-        }
-      },
-      {
         "name": "name",
-        "ordinal": 2,
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +27,7 @@
       },
       {
         "name": "url",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +38,7 @@
       },
       {
         "name": "metadata",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +49,7 @@
       },
       {
         "name": "refresh_interval",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +60,7 @@
       },
       {
         "name": "last_refresh",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +71,7 @@
       },
       {
         "name": "next_poll_at",
-        "ordinal": 7,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,10 +82,9 @@
       }
     ],
     "parameters": {
-      "Right": 5
+      "Right": 0
     },
     "nullable": [
-      false,
       false,
       false,
       false,
@@ -106,5 +94,5 @@
       true
     ]
   },
-  "hash": "f4ef76474584341a1b50ad484e109bebd54bd9a96a16f304550bccee26585e41"
+  "hash": "dd1871de6a936c32e794bf618dcc9135c8ea8d8d000e766d2f02779c16aaa380"
 }
