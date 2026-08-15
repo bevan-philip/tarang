@@ -8,6 +8,7 @@ axum = "0.8.9"
 chrono = "0.4.45"
 feed-rs = "2.4.0"
 futures = "0.3.33"
+opml = "1.1.6"
 reqwest = "0.13.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

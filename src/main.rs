@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 mod api;
 mod database;
 mod feed;
+mod opml;
 mod sync;
 
 #[derive(Clone)]
