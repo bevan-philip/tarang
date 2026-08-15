@@ -1,14 +1,11 @@
 use crate::api::{
-    get_app_state, get_category, health, post_category, post_category_feed, post_feed,
+    delete_feed, get_app_state, get_category, health, post_category, post_category_feed, post_feed,
 };
 use crate::database::Db;
 use axum::{
     Router,
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 mod api;
@@ -58,6 +55,7 @@ async fn main() {
             "/tarang/v1/category/{category_id}/feed/{feed_id}",
             post(post_category_feed),
         )
+        .route("/tarang/v1/feed/{feed_id}", delete(delete_feed))
         .with_state(AppState { db, http });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -65,7 +63,5 @@ async fn main() {
         .expect("failed to bind to 127.0.0.1:3000");
 
     println!("listening on http://127.0.0.1:3000");
-    axum::serve(listener, app)
-        .await
-        .expect("server crashed");
+    axum::serve(listener, app).await.expect("server crashed");
 }
