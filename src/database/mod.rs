@@ -3,7 +3,6 @@ use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
-use std::error::Error;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -17,7 +16,28 @@ pub use category::*;
 pub use feed::*;
 pub use feed_category::*;
 
-pub type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error("already exists: {0}")]
+    AlreadyExists(String),
+    #[error(transparent)]
+    Sqlx(sqlx::Error),
+    #[error(transparent)]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+}
+
+impl From<sqlx::Error> for DbError {
+    fn from(err: sqlx::Error) -> Self {
+        match err.as_database_error() {
+            Some(db_err) if db_err.is_unique_violation() => {
+                DbError::AlreadyExists(db_err.message().to_string())
+            }
+            _ => DbError::Sqlx(err),
+        }
+    }
+}
+
+pub type DbResult<T> = Result<T, DbError>;
 
 #[derive(Clone)]
 pub struct Db {

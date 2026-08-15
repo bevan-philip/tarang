@@ -1,16 +1,28 @@
 use crate::database;
 use crate::database::Article;
 use crate::database::Db;
+use crate::database::DbError;
 use crate::database::ParsedArticle;
 
 use feed_rs::{model::Entry, model::Feed, parser};
-use std::error::Error;
+
+#[derive(Debug, thiserror::Error)]
+pub enum FeedError {
+    #[error("failed to fetch feed: {0}")]
+    Fetch(#[from] reqwest::Error),
+    #[error("failed to parse feed: {0}")]
+    Parse(#[from] feed_rs::parser::ParseFeedError),
+    #[error(transparent)]
+    Db(#[from] DbError),
+}
+
+pub type FeedResult<T> = Result<T, FeedError>;
 
 pub async fn update_feed_articles(
     db: &Db,
     feed_pk: i64,
     feed_url: &str,
-) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
+) -> FeedResult<Vec<Article>> {
     let res = reqwest::get(feed_url).await?.text().await?;
     let feed = parser::Builder::new()
         .id_generator(|links, _title, _uri| {
@@ -18,35 +30,33 @@ pub async fn update_feed_articles(
         })
         .build()
         .parse(res.as_bytes())?;
-    let articles = process_feed(feed).await?;
+    let articles = process_feed(feed).await;
     let db_entries = database::create_articles(db, feed_pk, &articles).await?;
 
     Ok(db_entries)
 }
 
-async fn process_feed(feed: Feed) -> Result<Vec<ParsedArticle>, Box<dyn Error + Send + Sync>> {
+async fn process_feed(feed: Feed) -> Vec<ParsedArticle> {
     let mut v: Vec<ParsedArticle> = Vec::new();
 
     for entry in feed.entries {
-        if let Some(article) = create_parsed_article(entry).await? {
+        if let Some(article) = create_parsed_article(entry).await {
             v.push(article);
         }
     }
 
-    Ok(v)
+    v
 }
 
-async fn create_parsed_article(
-    entry: Entry,
-) -> Result<Option<ParsedArticle>, Box<dyn Error + Send + Sync>> {
+async fn create_parsed_article(entry: Entry) -> Option<ParsedArticle> {
     let Some(link) = entry.links.first() else {
-        eprintln!("skipping entry {:?}: no link", entry.id);
-        return Ok(None);
+        tracing::warn!(entry_id = ?entry.id, "skipping entry: no link");
+        return None;
     };
 
     let Some(published_at) = entry.published.or(entry.updated) else {
-        eprintln!("skipping entry {}: no published or updated date", link.href);
-        return Ok(None);
+        tracing::warn!(url = %link.href, "skipping entry: no published or updated date");
+        return None;
     };
 
     let summary = entry.summary.as_ref().map(|s| s.content.clone());
@@ -59,12 +69,12 @@ async fn create_parsed_article(
 
     let title = entry.title.map(|t| t.content);
 
-    Ok(Some(ParsedArticle {
+    Some(ParsedArticle {
         url: link.href.clone(),
         guid: entry.id,
         title,
         content,
         summary,
         published_at,
-    }))
+    })
 }

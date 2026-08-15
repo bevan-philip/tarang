@@ -1,10 +1,9 @@
-use crate::database::{Db, list_feeds_due_for_refresh, update_feed_last_refresh};
-use crate::feed::update_feed_articles;
+use crate::database::{Db, DbResult, list_feeds_due_for_refresh, update_feed_last_refresh};
+use crate::feed::{FeedError, FeedResult, update_feed_articles};
 use futures::stream::{self, StreamExt};
-use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn sync_feeds(db: &Db) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn sync_feeds(db: &Db) -> DbResult<()> {
     let feeds = list_feeds_due_for_refresh(db).await?;
 
     stream::iter(feeds)
@@ -14,12 +13,13 @@ pub async fn sync_feeds(db: &Db) -> Result<(), Box<dyn Error + Send + Sync>> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64;
-            update_feed_last_refresh(db, feed.pk, now, now + feed.refresh_interval).await
+            update_feed_last_refresh(db, feed.pk, now, now + feed.refresh_interval).await?;
+            Ok::<(), FeedError>(())
         })
         .buffer_unordered(8)
-        .for_each(|res| async {
+        .for_each(|res: FeedResult<()>| async {
             if let Err(e) = res {
-                eprintln!("feed sync failed: {e}")
+                tracing::error!(error = %e, "feed sync failed");
             }
         })
         .await;

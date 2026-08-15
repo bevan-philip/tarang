@@ -17,6 +17,10 @@ mod sync;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let db = database::config().await.expect("failed to initialise db");
 
     let sync_db = db.clone();
@@ -25,7 +29,7 @@ async fn main() {
         let mut interval = tokio::time::interval(Duration::from_secs(300));
         loop {
             if let Err(e) = sync::sync_feeds(&sync_db).await {
-                eprintln!("sync_feeds failed: {e}");
+                tracing::error!(error = %e, "sync_feeds failed");
             }
             interval.tick().await;
         }
@@ -45,8 +49,10 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
-        .unwrap();
+        .expect("failed to bind to 127.0.0.1:3000");
 
     println!("listening on http://127.0.0.1:3000");
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .await
+        .expect("server crashed");
 }
