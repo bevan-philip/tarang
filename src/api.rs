@@ -5,11 +5,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::{
+    AppState,
     database::{
-        self, Article, Category, Db, DbError, Feed, add_feed_to_category, create_category,
-        create_feed, list_articles_for_feed, list_categories, list_categories_for_feed,
+        self, Article, Category, DbError, Feed, add_feed_to_category, create_category,
+        create_feed, list_categories, list_categories_for_all_feeds, list_articles_for_feeds,
     },
     feed::{FeedError, update_feed_articles},
 };
@@ -57,23 +59,28 @@ pub struct FeedOutline {
     articles: Vec<Article>,
 }
 
-pub async fn get_app_state(State(db): State<Db>) -> Result<Json<InitialState>, AppError> {
+pub async fn get_app_state(
+    State(AppState { db, .. }): State<AppState>,
+) -> Result<Json<InitialState>, AppError> {
     let feeds = database::list_feeds(&db).await?;
 
     let categories = database::list_categories(&db).await?;
 
-    let mut feed_with_articles: Vec<FeedOutline> = Vec::new();
-    for feed in feeds {
-        let articles = list_articles_for_feed(&db, feed.pk, 10, 0).await?;
-
-        let category = list_categories_for_feed(&db, feed.pk).await?;
-
-        feed_with_articles.push(FeedOutline {
-            feed,
-            category,
-            articles,
-        });
+    let mut articles_by_feed: HashMap<i64, Vec<Article>> = HashMap::new();
+    for article in list_articles_for_feeds(&db, 10).await? {
+        articles_by_feed.entry(article.feed).or_default().push(article);
     }
+
+    let mut categories_by_feed = list_categories_for_all_feeds(&db).await?;
+
+    let feed_with_articles: Vec<FeedOutline> = feeds
+        .into_iter()
+        .map(|feed| FeedOutline {
+            category: categories_by_feed.remove(&feed.pk).unwrap_or_default(),
+            articles: articles_by_feed.remove(&feed.pk).unwrap_or_default(),
+            feed,
+        })
+        .collect();
 
     Ok(Json(InitialState {
         categories,
@@ -96,7 +103,7 @@ pub struct AddFeedResp {
 }
 
 pub async fn post_feed(
-    State(db): State<Db>,
+    State(AppState { db, http }): State<AppState>,
     Json(payload): Json<AddFeed>,
 ) -> Result<Json<AddFeedResp>, AppError> {
     let feed = create_feed(
@@ -108,7 +115,7 @@ pub async fn post_feed(
     )
     .await?;
 
-    update_feed_articles(&db, feed.pk, &feed.url).await?;
+    update_feed_articles(&db, feed.pk, &feed.url, &http).await?;
 
     Ok(Json(AddFeedResp {
         name: payload.name,
@@ -117,7 +124,7 @@ pub async fn post_feed(
 }
 
 pub async fn post_category_feed(
-    State(db): State<Db>,
+    State(AppState { db, .. }): State<AppState>,
     Path((category_id, feed_id)): Path<(i64, i64)>,
 ) -> Result<StatusCode, AppError> {
     add_feed_to_category(&db, feed_id, category_id).await?;
@@ -125,7 +132,7 @@ pub async fn post_category_feed(
 }
 
 pub async fn post_category(
-    State(db): State<Db>,
+    State(AppState { db, .. }): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<AddFeedResp>, AppError> {
     let category = create_category(&db, &name).await?;
@@ -135,6 +142,8 @@ pub async fn post_category(
     }))
 }
 
-pub async fn get_category(State(db): State<Db>) -> Result<Json<Vec<Category>>, AppError> {
+pub async fn get_category(
+    State(AppState { db, .. }): State<AppState>,
+) -> Result<Json<Vec<Category>>, AppError> {
     Ok(Json(list_categories(&db).await?))
 }

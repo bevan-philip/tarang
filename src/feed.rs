@@ -22,8 +22,9 @@ pub async fn update_feed_articles(
     db: &Db,
     feed_pk: i64,
     feed_url: &str,
+    client: &reqwest::Client,
 ) -> FeedResult<Vec<Article>> {
-    let res = reqwest::get(feed_url).await?.text().await?;
+    let res = client.get(feed_url).send().await?.text().await?;
     let feed = parser::Builder::new()
         .id_generator(|links, _title, _uri| {
             links.first().map(|l| l.href.clone()).unwrap_or_default()

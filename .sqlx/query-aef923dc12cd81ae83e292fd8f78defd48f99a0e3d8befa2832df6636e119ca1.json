@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at\n           FROM article\n           WHERE feed = ?\n           ORDER BY published_at DESC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at\n           FROM (\n               SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at,\n                      ROW_NUMBER() OVER (PARTITION BY feed ORDER BY published_at DESC) AS rn\n               FROM article\n           )\n           WHERE rn <= ?\n           ORDER BY feed, published_at DESC",
   "describe": {
     "columns": [
       {
@@ -104,7 +104,7 @@
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 1
     },
     "nullable": [
       false,
@@ -118,5 +118,5 @@
       false
     ]
   },
-  "hash": "a0dea18ae424786dcd4192bad75d9f9baa30e883c6b8b9ae3b2fd5a57925299a"
+  "hash": "aef923dc12cd81ae83e292fd8f78defd48f99a0e3d8befa2832df6636e119ca1"
 }

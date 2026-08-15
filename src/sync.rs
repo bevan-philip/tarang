@@ -3,12 +3,12 @@ use crate::feed::{FeedError, FeedResult, update_feed_articles};
 use futures::stream::{self, StreamExt};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn sync_feeds(db: &Db) -> DbResult<()> {
+pub async fn sync_feeds(db: &Db, client: &reqwest::Client) -> DbResult<()> {
     let feeds = list_feeds_due_for_refresh(db).await?;
 
     stream::iter(feeds)
         .map(|feed| async move {
-            update_feed_articles(db, feed.pk, &feed.url).await?;
+            update_feed_articles(db, feed.pk, &feed.url, client).await?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

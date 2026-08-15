@@ -63,22 +63,18 @@ pub async fn create_articles(
     Ok(inserted)
 }
 
-pub async fn list_articles_for_feed(
-    db: &Db,
-    feed_pk: i64,
-    limit: i64,
-    offset: i64,
-) -> DbResult<Vec<Article>> {
+pub async fn list_articles_for_feeds(db: &Db, limit_per_feed: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
         r#"SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at
-           FROM article
-           WHERE feed = ?
-           ORDER BY published_at DESC
-           LIMIT ? OFFSET ?"#,
-        feed_pk,
-        limit,
-        offset,
+           FROM (
+               SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at,
+                      ROW_NUMBER() OVER (PARTITION BY feed ORDER BY published_at DESC) AS rn
+               FROM article
+           )
+           WHERE rn <= ?
+           ORDER BY feed, published_at DESC"#,
+        limit_per_feed,
     )
     .fetch_all(&db.read)
     .await?;
