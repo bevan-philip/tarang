@@ -9,7 +9,7 @@ pub async fn sync_feeds(db: &Db) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     stream::iter(feeds)
         .map(|feed| async move {
-            update_feed_articles(db, feed.pk, feed.url).await?;
+            update_feed_articles(db, feed.pk, &feed.url).await?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

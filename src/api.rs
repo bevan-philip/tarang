@@ -93,7 +93,7 @@ pub async fn post_feed(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    update_feed_articles(&db, feed.pk, feed.url)
+    update_feed_articles(&db, feed.pk, &feed.url)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
         .unwrap();

@@ -9,7 +9,7 @@ use std::error::Error;
 pub async fn update_feed_articles(
     db: &Db,
     feed_pk: i64,
-    feed_url: String,
+    feed_url: &str,
 ) -> Result<Vec<Article>, Box<dyn Error + Send + Sync>> {
     let res = reqwest::get(feed_url).await?.text().await?;
     let feed = parser::Builder::new()
