@@ -60,7 +60,7 @@ pub async fn get_app_state(State(db): State<Db>) -> Result<Json<InitialState>, S
     }
 
     Ok(Json(InitialState {
-        categories: categories,
+        categories,
         feeds: feed_with_articles,
     }))
 }
@@ -122,7 +122,7 @@ pub async fn post_category(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(AddFeedResp {
-        name: name,
+        name,
         id: category.pk,
     }))
 }
