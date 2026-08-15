@@ -6,6 +6,8 @@ pub struct Feed {
     pub pk: i64,
     pub name: String,
     pub url: String,
+    #[serde(rename = "category_id")]
+    pub category: Option<i64>,
     pub metadata: String,
     pub refresh_interval: i64,
     pub last_refresh: Option<i64>,
@@ -16,6 +18,7 @@ pub async fn create_feed(
     db: &Db,
     name: &str,
     url: &str,
+    category: Option<i64>,
     metadata: Option<&str>,
     refresh_interval: Option<i64>,
 ) -> DbResult<Feed> {
@@ -24,11 +27,12 @@ pub async fn create_feed(
 
     let feed = sqlx::query_as!(
         Feed,
-        r#"INSERT INTO feed (name, url, metadata, refresh_interval)
-           VALUES (?, ?, ?, ?)
-           RETURNING pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at"#,
+        r#"INSERT INTO feed (name, url, category, metadata, refresh_interval)
+           VALUES (?, ?, ?, ?, ?)
+           RETURNING pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at"#,
         name,
         url,
+        category,
         metadata,
         refresh_interval,
     )
@@ -41,7 +45,7 @@ pub async fn create_feed(
 pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed ORDER BY name"#,
     )
     .fetch_all(&db.read)
@@ -53,7 +57,7 @@ pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
 pub async fn list_feeds_due_for_refresh(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
            FROM feed
            WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()"#,
     )
@@ -87,18 +91,25 @@ pub async fn update_feed(
     name: Option<&str>,
     metadata: Option<&str>,
     refresh_interval: Option<i64>,
+    category: Option<Option<i64>>,
 ) -> DbResult<Feed> {
+    let category_provided = category.is_some();
+    let category = category.flatten();
+
     let feed = sqlx::query_as!(
         Feed,
         r#"UPDATE feed
            SET name = COALESCE(?, name),
                metadata = COALESCE(?, metadata),
-               refresh_interval = COALESCE(?, refresh_interval)
+               refresh_interval = COALESCE(?, refresh_interval),
+               category = CASE WHEN ? THEN ? ELSE category END
            WHERE pk = ?
-           RETURNING pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at"#,
+           RETURNING pk, name, url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at"#,
         name,
         metadata,
         refresh_interval,
+        category_provided,
+        category,
         pk,
     )
     .fetch_one(&db.write)

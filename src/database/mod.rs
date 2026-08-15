@@ -9,12 +9,10 @@ use std::time::Duration;
 mod article;
 mod category;
 mod feed;
-mod feed_category;
 
 pub use article::*;
 pub use category::*;
 pub use feed::*;
-pub use feed_category::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {

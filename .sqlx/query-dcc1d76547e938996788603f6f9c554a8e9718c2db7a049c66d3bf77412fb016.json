@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO feed (name, url, metadata, refresh_interval)\n           VALUES (?, ?, ?, ?)\n           RETURNING pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at",
+  "query": "SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at\n           FROM feed\n           WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "metadata",
+        "name": "category",
         "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "name": "metadata",
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "refresh_interval",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "last_refresh",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "next_poll_at",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,17 +93,18 @@
       }
     ],
     "parameters": {
-      "Right": 4
+      "Right": 0
     },
     "nullable": [
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
       true
     ]
   },
-  "hash": "6b6f4f4dee16852a10167d4432f19e75f6984dd2310f6852caf512032061a816"
+  "hash": "dcc1d76547e938996788603f6f9c554a8e9718c2db7a049c66d3bf77412fb016"
 }

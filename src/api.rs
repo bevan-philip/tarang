@@ -4,15 +4,14 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 use crate::{
     AppState,
     database::{
-        self, Article, Category, DbError, Feed, add_feed_to_category, create_category, create_feed,
-        drop_category, drop_feed, list_articles_for_feeds, list_categories,
-        list_categories_for_all_feeds, remove_feed_from_category, update_feed,
+        self, Article, Category, DbError, Feed, create_category, create_feed, drop_category,
+        drop_feed, list_articles_for_feeds, list_categories, update_feed,
     },
     feed::{FeedError, get_feed_articles},
 };
@@ -56,7 +55,7 @@ pub struct InitialState {
 pub struct FeedOutline {
     #[serde(flatten)]
     feed: Feed,
-    category: Vec<Category>,
+    category: Option<Category>,
     articles: Vec<Article>,
 }
 
@@ -75,12 +74,13 @@ pub async fn get_app_state(
             .push(article);
     }
 
-    let mut categories_by_feed = list_categories_for_all_feeds(&db).await?;
+    let category_by_pk: HashMap<i64, Category> =
+        categories.iter().map(|c| (c.pk, c.clone())).collect();
 
     let feed_with_articles: Vec<FeedOutline> = feeds
         .into_iter()
         .map(|feed| FeedOutline {
-            category: categories_by_feed.remove(&feed.pk).unwrap_or_default(),
+            category: feed.category.and_then(|pk| category_by_pk.get(&pk).cloned()),
             articles: articles_by_feed.remove(&feed.pk).unwrap_or_default(),
             feed,
         })
@@ -96,6 +96,7 @@ pub async fn get_app_state(
 pub struct AddFeed {
     name: String,
     url: String,
+    category_id: Option<i64>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
 }
@@ -117,6 +118,7 @@ pub async fn post_feed(
         &db,
         &payload.name,
         &payload.url,
+        payload.category_id,
         payload.metadata.as_deref(),
         payload.refresh_interval,
     )
@@ -128,14 +130,6 @@ pub async fn post_feed(
         name: payload.name,
         id: feed.pk,
     }))
-}
-
-pub async fn post_category_feed(
-    State(AppState { db, .. }): State<AppState>,
-    Path((category_id, feed_id)): Path<(i64, i64)>,
-) -> Result<StatusCode, AppError> {
-    add_feed_to_category(&db, feed_id, category_id).await?;
-    Ok(StatusCode::CREATED)
 }
 
 pub async fn post_category(
@@ -177,6 +171,16 @@ pub struct PatchFeed {
     name: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    category_id: Option<Option<i64>>,
+}
+
+fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
 }
 
 pub async fn patch_feed(
@@ -190,16 +194,9 @@ pub async fn patch_feed(
         payload.name.as_deref(),
         payload.metadata.as_deref(),
         payload.refresh_interval,
+        payload.category_id,
     )
     .await?;
 
     Ok(Json(feed))
-}
-
-pub async fn delete_category_feed(
-    State(AppState { db, .. }): State<AppState>,
-    Path((category_id, feed_id)): Path<(i64, i64)>,
-) -> Result<StatusCode, AppError> {
-    remove_feed_from_category(&db, feed_id, category_id).await?;
-    Ok(StatusCode::OK)
 }

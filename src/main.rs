@@ -1,6 +1,6 @@
 use crate::api::{
-    delete_category, delete_category_feed, delete_feed, get_app_state, get_category, health,
-    patch_feed, post_category, post_category_feed, post_feed,
+    delete_category, delete_feed, get_app_state, get_category, health, patch_feed, post_category,
+    post_feed,
 };
 use crate::database::Db;
 use axum::{
@@ -55,18 +55,10 @@ async fn main() {
         .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category", get(get_category))
         .route(
-            "/tarang/v1/category/{category_id}/feed/{feed_id}",
-            post(post_category_feed),
-        )
-        .route(
             "/tarang/v1/feed/{feed_id}",
             delete(delete_feed).patch(patch_feed),
         )
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
-        .route(
-            "/tarang/v1/category/{category_id}/feed/{feed_id}",
-            delete(delete_category_feed),
-        )
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());
 
