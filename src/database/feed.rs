@@ -80,3 +80,11 @@ pub async fn update_feed_last_refresh(
 
     Ok(())
 }
+
+pub async fn delete_feed(db: &Db, pk: i64) -> DbResult<()> {
+    sqlx::query!("DELETE FROM feed WHERE pk = ?", pk)
+        .execute(&db.write)
+        .await?;
+
+    Ok(())
+}

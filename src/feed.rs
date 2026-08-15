@@ -24,6 +24,16 @@ pub async fn update_feed_articles(
     feed_url: &str,
     client: &reqwest::Client,
 ) -> FeedResult<Vec<Article>> {
+    let articles = get_feed_articles(client, feed_url).await?;
+    let db_entries = database::create_articles(db, feed_pk, &articles).await?;
+
+    Ok(db_entries)
+}
+
+pub async fn get_feed_articles(
+    client: &reqwest::Client,
+    feed_url: &str,
+) -> Result<Vec<ParsedArticle>, FeedError> {
     let res = client.get(feed_url).send().await?.text().await?;
     let feed = parser::Builder::new()
         .id_generator(|links, _title, _uri| {
@@ -31,10 +41,7 @@ pub async fn update_feed_articles(
         })
         .build()
         .parse(res.as_bytes())?;
-    let articles = process_feed(feed).await;
-    let db_entries = database::create_articles(db, feed_pk, &articles).await?;
-
-    Ok(db_entries)
+    Ok(process_feed(feed).await)
 }
 
 async fn process_feed(feed: Feed) -> Vec<ParsedArticle> {

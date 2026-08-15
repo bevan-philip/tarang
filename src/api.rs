@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use crate::{
     AppState,
     database::{
-        self, Article, Category, DbError, Feed, add_feed_to_category, create_category,
-        create_feed, list_categories, list_categories_for_all_feeds, list_articles_for_feeds,
+        self, Article, Category, DbError, Feed, add_feed_to_category, create_category, create_feed,
+        list_articles_for_feeds, list_categories, list_categories_for_all_feeds,
     },
-    feed::{FeedError, update_feed_articles},
+    feed::{FeedError, get_feed_articles},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -68,7 +68,10 @@ pub async fn get_app_state(
 
     let mut articles_by_feed: HashMap<i64, Vec<Article>> = HashMap::new();
     for article in list_articles_for_feeds(&db, 10).await? {
-        articles_by_feed.entry(article.feed).or_default().push(article);
+        articles_by_feed
+            .entry(article.feed)
+            .or_default()
+            .push(article);
     }
 
     let mut categories_by_feed = list_categories_for_all_feeds(&db).await?;
@@ -106,6 +109,9 @@ pub async fn post_feed(
     State(AppState { db, http }): State<AppState>,
     Json(payload): Json<AddFeed>,
 ) -> Result<Json<AddFeedResp>, AppError> {
+    // Retrieve the articles first to see if the URL is valid.
+    let articles = get_feed_articles(&http, &payload.url).await?;
+
     let feed = create_feed(
         &db,
         &payload.name,
@@ -115,7 +121,7 @@ pub async fn post_feed(
     )
     .await?;
 
-    update_feed_articles(&db, feed.pk, &feed.url, &http).await?;
+    database::create_articles(&db, feed.pk, &articles).await?;
 
     Ok(Json(AddFeedResp {
         name: payload.name,
