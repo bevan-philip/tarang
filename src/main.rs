@@ -1,5 +1,6 @@
 use crate::api::{
-    delete_feed, get_app_state, get_category, health, post_category, post_category_feed, post_feed,
+    delete_category, delete_feed, get_app_state, get_category, health, post_category,
+    post_category_feed, post_feed,
 };
 use crate::database::Db;
 use axum::{
@@ -56,6 +57,7 @@ async fn main() {
             post(post_category_feed),
         )
         .route("/tarang/v1/feed/{feed_id}", delete(delete_feed))
+        .route("/tarang/v1/category/{category_id}", delete(delete_category))
         .with_state(AppState { db, http });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")

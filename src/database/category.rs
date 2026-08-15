@@ -27,3 +27,11 @@ pub async fn list_categories(db: &Db) -> DbResult<Vec<Category>> {
 
     Ok(categories)
 }
+
+pub async fn drop_category(db: &Db, pk: i64) -> DbResult<()> {
+    sqlx::query!("DELETE FROM category WHERE pk = ?", pk)
+        .execute(&db.write)
+        .await?;
+
+    Ok(())
+}

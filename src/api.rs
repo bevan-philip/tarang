@@ -11,7 +11,8 @@ use crate::{
     AppState,
     database::{
         self, Article, Category, DbError, Feed, add_feed_to_category, create_category, create_feed,
-        drop_feed, list_articles_for_feeds, list_categories, list_categories_for_all_feeds,
+        drop_category, drop_feed, list_articles_for_feeds, list_categories,
+        list_categories_for_all_feeds,
     },
     feed::{FeedError, get_feed_articles},
 };
@@ -152,6 +153,15 @@ pub async fn get_category(
     State(AppState { db, .. }): State<AppState>,
 ) -> Result<Json<Vec<Category>>, AppError> {
     Ok(Json(list_categories(&db).await?))
+}
+
+pub async fn delete_category(
+    State(AppState { db, .. }): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    drop_category(&db, id).await?;
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn delete_feed(
