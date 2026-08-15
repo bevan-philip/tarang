@@ -1,6 +1,6 @@
 use crate::api::{
-    delete_category, delete_feed, get_app_state, get_category, health, post_category,
-    post_category_feed, post_feed,
+    delete_category, delete_category_feed, delete_feed, get_app_state, get_category, health,
+    patch_feed, post_category, post_category_feed, post_feed,
 };
 use crate::database::Db;
 use axum::{
@@ -8,6 +8,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use std::time::Duration;
+use tower_http::cors::CorsLayer;
 
 mod api;
 mod database;
@@ -50,15 +51,23 @@ async fn main() {
         .route("/health", get(health))
         .route("/tarang/v1/app", get(get_app_state))
         .route("/tarang/v1/feed", post(post_feed))
-        .route("/tarang/v1/category/{name}", post(post_category))
+        .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category", get(get_category))
         .route(
             "/tarang/v1/category/{category_id}/feed/{feed_id}",
             post(post_category_feed),
         )
-        .route("/tarang/v1/feed/{feed_id}", delete(delete_feed))
+        .route(
+            "/tarang/v1/feed/{feed_id}",
+            delete(delete_feed).patch(patch_feed),
+        )
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
-        .with_state(AppState { db, http });
+        .route(
+            "/tarang/v1/category/{category_id}/feed/{feed_id}",
+            delete(delete_category_feed),
+        )
+        .with_state(AppState { db, http })
+        .layer(CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await

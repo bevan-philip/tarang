@@ -12,7 +12,7 @@ use crate::{
     database::{
         self, Article, Category, DbError, Feed, add_feed_to_category, create_category, create_feed,
         drop_category, drop_feed, list_articles_for_feeds, list_categories,
-        list_categories_for_all_feeds,
+        list_categories_for_all_feeds, remove_feed_from_category, update_feed,
     },
     feed::{FeedError, get_feed_articles},
 };
@@ -169,5 +169,37 @@ pub async fn delete_feed(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
     drop_feed(&db, id).await?;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+pub struct PatchFeed {
+    name: Option<String>,
+    metadata: Option<String>,
+    refresh_interval: Option<i64>,
+}
+
+pub async fn patch_feed(
+    State(AppState { db, .. }): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<PatchFeed>,
+) -> Result<Json<Feed>, AppError> {
+    let feed = update_feed(
+        &db,
+        id,
+        payload.name.as_deref(),
+        payload.metadata.as_deref(),
+        payload.refresh_interval,
+    )
+    .await?;
+
+    Ok(Json(feed))
+}
+
+pub async fn delete_category_feed(
+    State(AppState { db, .. }): State<AppState>,
+    Path((category_id, feed_id)): Path<(i64, i64)>,
+) -> Result<StatusCode, AppError> {
+    remove_feed_from_category(&db, feed_id, category_id).await?;
     Ok(StatusCode::OK)
 }

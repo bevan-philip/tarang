@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM feed WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "be9d91afe66d031b30c94919c94deab3e3302ed5552c10e424c7ecb27bd044c8"
+}

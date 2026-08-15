@@ -81,6 +81,32 @@ pub async fn update_feed_last_refresh(
     Ok(())
 }
 
+pub async fn update_feed(
+    db: &Db,
+    pk: i64,
+    name: Option<&str>,
+    metadata: Option<&str>,
+    refresh_interval: Option<i64>,
+) -> DbResult<Feed> {
+    let feed = sqlx::query_as!(
+        Feed,
+        r#"UPDATE feed
+           SET name = COALESCE(?, name),
+               metadata = COALESCE(?, metadata),
+               refresh_interval = COALESCE(?, refresh_interval)
+           WHERE pk = ?
+           RETURNING pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at"#,
+        name,
+        metadata,
+        refresh_interval,
+        pk,
+    )
+    .fetch_one(&db.write)
+    .await?;
+
+    Ok(feed)
+}
+
 pub async fn drop_feed(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM feed WHERE pk = ?", pk)
         .execute(&db.write)

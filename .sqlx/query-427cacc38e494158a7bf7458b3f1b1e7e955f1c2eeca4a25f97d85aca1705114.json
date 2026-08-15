@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval)\n           WHERE pk = ?\n           RETURNING pk, name, url, metadata, refresh_interval, last_refresh, next_poll_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "metadata",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "name": "refresh_interval",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "refresh_interval"
+          }
+        }
+      },
+      {
+        "name": "last_refresh",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_refresh"
+          }
+        }
+      },
+      {
+        "name": "next_poll_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "next_poll_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "427cacc38e494158a7bf7458b3f1b1e7e955f1c2eeca4a25f97d85aca1705114"
+}

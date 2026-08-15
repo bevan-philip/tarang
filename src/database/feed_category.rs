@@ -13,6 +13,18 @@ pub async fn add_feed_to_category(db: &Db, feed_pk: i64, category_pk: i64) -> Db
     Ok(())
 }
 
+pub async fn remove_feed_from_category(db: &Db, feed_pk: i64, category_pk: i64) -> DbResult<()> {
+    sqlx::query!(
+        "DELETE FROM feed_category WHERE feed = ? AND category = ?",
+        feed_pk,
+        category_pk,
+    )
+    .execute(&db.write)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn list_categories_for_all_feeds(db: &Db) -> DbResult<HashMap<i64, Vec<Category>>> {
     struct FeedCategoryRow {
         feed: i64,
