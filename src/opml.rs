@@ -1,6 +1,11 @@
-use opml::OPML;
+use opml::{Body, Head, OPML, Outline};
 
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
+
+use crate::{
+    database::{Category, Feed},
+    feed,
+};
 
 struct ImportedFeed {
     name: String,
@@ -50,6 +55,64 @@ async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlError> {
     }
 
     Ok(imported_feeds)
+}
+
+async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> Result<String, opml::Error> {
+    let mut outlines: Vec<Outline> = Vec::new();
+
+    let mut feeds_by_category: HashMap<Option<i64>, Vec<Feed>> =
+        feeds.into_iter().fold(HashMap::new(), |mut acc, f| {
+            acc.entry(f.category).or_default().push(f);
+            acc
+        });
+
+    for feed in feeds_by_category.remove(&None).unwrap_or_default() {
+        let outline = Outline {
+            text: feed.name.clone(),
+            title: Some(feed.name),
+            xml_url: Some(feed.url),
+            r#type: Some(String::from("rss")),
+            ..Default::default()
+        };
+        outlines.push(outline)
+    }
+
+    for category in categories {
+        let mut feed_outlines: Vec<Outline> = Vec::new();
+
+        for feed in feeds_by_category
+            .remove(&Some(category.pk))
+            .unwrap_or_default()
+        {
+            let outline = Outline {
+                text: feed.name.clone(),
+                title: Some(feed.name),
+                xml_url: Some(feed.url),
+                r#type: Some(String::from("rss")),
+                ..Default::default()
+            };
+            feed_outlines.push(outline)
+        }
+
+        outlines.push(Outline {
+            text: category.name.clone(),
+            title: Some(category.name),
+            outlines: feed_outlines,
+            ..Default::default()
+        });
+    }
+
+    let body = Body { outlines };
+    let opml = OPML {
+        head: Some(Head {
+            title: Some(String::from("Tarang RSS export")),
+            ..Default::default()
+        }),
+        body,
+        ..Default::default()
+    };
+
+    Ok(opml.to_string()?)
 }
 
 #[cfg(test)]
