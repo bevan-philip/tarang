@@ -188,4 +188,130 @@ mod tests {
         assert_eq!(feeds[0].url, "https://example.com/one.xml");
         assert_eq!(feeds[0].category, Some("News".to_string()));
     }
+
+    fn make_feed(pk: i64, name: &str, url: &str, category: Option<i64>) -> Feed {
+        Feed {
+            pk,
+            name: name.to_string(),
+            url: url.to_string(),
+            category,
+            metadata: String::new(),
+            refresh_interval: 0,
+            last_refresh: None,
+            next_poll_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn export_uncategorized_feeds_are_flat() {
+        let feeds = vec![
+            make_feed(1, "Feed One", "https://example.com/one.xml", None),
+            make_feed(2, "Feed Two", "https://example.com/two.xml", None),
+        ];
+
+        let xml = export_opml(feeds, vec![]).await.unwrap();
+        let parsed = OPML::from_str(&xml).unwrap();
+
+        assert_eq!(parsed.body.outlines.len(), 2);
+
+        let one = parsed
+            .body
+            .outlines
+            .iter()
+            .find(|o| o.text == "Feed One")
+            .unwrap();
+        assert!(one.outlines.is_empty());
+        assert_eq!(one.xml_url, Some("https://example.com/one.xml".to_string()));
+
+        let two = parsed
+            .body
+            .outlines
+            .iter()
+            .find(|o| o.text == "Feed Two")
+            .unwrap();
+        assert!(two.outlines.is_empty());
+        assert_eq!(two.xml_url, Some("https://example.com/two.xml".to_string()));
+    }
+
+    #[tokio::test]
+    async fn export_groups_feeds_by_category() {
+        let feeds = vec![
+            make_feed(1, "Feed One", "https://example.com/one.xml", Some(10)),
+            make_feed(2, "Feed Two", "https://example.com/two.xml", Some(20)),
+            make_feed(3, "Feed Three", "https://example.com/three.xml", None),
+        ];
+        let categories = vec![
+            Category {
+                pk: 10,
+                name: "News".to_string(),
+            },
+            Category {
+                pk: 20,
+                name: "Tech".to_string(),
+            },
+        ];
+
+        let xml = export_opml(feeds, categories).await.unwrap();
+        let parsed = OPML::from_str(&xml).unwrap();
+
+        assert_eq!(parsed.body.outlines.len(), 3);
+
+        let news = parsed
+            .body
+            .outlines
+            .iter()
+            .find(|o| o.text == "News")
+            .unwrap();
+        assert_eq!(news.outlines.len(), 1);
+        assert_eq!(
+            news.outlines[0].xml_url,
+            Some("https://example.com/one.xml".to_string())
+        );
+
+        let tech = parsed
+            .body
+            .outlines
+            .iter()
+            .find(|o| o.text == "Tech")
+            .unwrap();
+        assert_eq!(tech.outlines.len(), 1);
+        assert_eq!(
+            tech.outlines[0].xml_url,
+            Some("https://example.com/two.xml".to_string())
+        );
+
+        let uncategorized = parsed
+            .body
+            .outlines
+            .iter()
+            .find(|o| o.text == "Feed Three")
+            .unwrap();
+        assert!(uncategorized.outlines.is_empty());
+        assert_eq!(
+            uncategorized.xml_url,
+            Some("https://example.com/three.xml".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn export_feeds_with_unknown_category_are_dropped() {
+        let feeds = vec![make_feed(
+            1,
+            "Feed One",
+            "https://example.com/one.xml",
+            Some(99),
+        )];
+
+        let xml = export_opml(feeds, vec![]).await.unwrap();
+
+        // The exported body ends up with no outlines at all, since the feed's
+        // category (99) never matches any category in `categories` and so is
+        // never drained out of `feeds_by_category`. The `opml` crate's parser
+        // rejects a body with no outlines per spec, which is itself evidence
+        // the feed was silently dropped from the export.
+        assert!(matches!(
+            OPML::from_str(&xml),
+            Err(opml::Error::BodyHasNoOutlines)
+        ));
+    }
 }
