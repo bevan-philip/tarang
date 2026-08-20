@@ -1,6 +1,6 @@
 use crate::api::{
     delete_category, delete_feed, get_app_state, get_category, health, patch_feed, post_category,
-    post_feed,
+    post_feed, upload_opml,
 };
 use crate::database::Db;
 use axum::{
@@ -59,6 +59,7 @@ async fn main() {
             delete(delete_feed).patch(patch_feed),
         )
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
+        .route("/tarang/v1/upload_opml", post(upload_opml))
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());
 

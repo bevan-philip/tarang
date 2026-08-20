@@ -7,10 +7,10 @@ use crate::{
     feed,
 };
 
-struct ImportedFeed {
-    name: String,
-    url: String,
-    category: Option<String>,
+pub struct ImportedFeed {
+    pub name: String,
+    pub url: String,
+    pub category: Option<String>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum OpmlError {
@@ -32,7 +32,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
     })
 }
 
-async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlError> {
+pub async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlError> {
     let parsed = OPML::from_str(&opml_string)?;
 
     let mut imported_feeds: Vec<ImportedFeed> = Vec::new();

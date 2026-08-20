@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["multipart"] }
 chrono = "0.4.45"
 feed-rs = "2.4.0"
 futures = "0.3.33"

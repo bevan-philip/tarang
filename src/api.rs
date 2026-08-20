@@ -1,11 +1,11 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Multipart, Path, State, multipart::MultipartError},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, str::Utf8Error};
 
 use crate::{
     AppState,
@@ -14,6 +14,7 @@ use crate::{
         drop_feed, list_articles_for_feeds, list_categories, update_feed,
     },
     feed::{FeedError, get_feed_articles},
+    opml::{self, OpmlError},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +23,12 @@ pub enum AppError {
     Db(#[from] DbError),
     #[error(transparent)]
     Feed(#[from] FeedError),
+    #[error(transparent)]
+    Upload(#[from] MultipartError),
+    #[error(transparent)]
+    UploadBytes(#[from] Utf8Error),
+    #[error(transparent)]
+    ParseOpml(#[from] OpmlError),
 }
 
 impl IntoResponse for AppError {
@@ -80,7 +87,9 @@ pub async fn get_app_state(
     let feed_with_articles: Vec<FeedOutline> = feeds
         .into_iter()
         .map(|feed| FeedOutline {
-            category: feed.category.and_then(|pk| category_by_pk.get(&pk).cloned()),
+            category: feed
+                .category
+                .and_then(|pk| category_by_pk.get(&pk).cloned()),
             articles: articles_by_feed.remove(&feed.pk).unwrap_or_default(),
             feed,
         })
@@ -199,4 +208,44 @@ pub async fn patch_feed(
     .await?;
 
     Ok(Json(feed))
+}
+
+pub async fn upload_opml(
+    State(AppState { db, .. }): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<StatusCode, AppError> {
+    while let Some(field) = multipart.next_field().await? {
+        let opml_bytes = field.bytes().await?;
+        let opml = str::from_utf8(&opml_bytes)?;
+
+        let feeds = opml::parse_opml(opml).await?;
+        let categories = database::list_categories(&db).await?;
+
+        let mut category_map: HashMap<String, i64> =
+            categories.into_iter().map(|c| (c.name, c.pk)).collect();
+
+        for feed in feeds {
+            let Some(category) = feed.category.as_deref() else {
+                database::create_feed(&db, &feed.name, &feed.url, None, None, None).await?;
+
+                continue;
+            };
+
+            if !category_map.contains_key(category) {
+                let new_category = database::create_category(&db, category).await?;
+                category_map.insert(new_category.name, new_category.pk);
+            }
+            database::create_feed(
+                &db,
+                &feed.name,
+                &feed.url,
+                Some(category_map[category]),
+                Some(&String::from("")),
+                Some(360),
+            )
+            .await?;
+        }
+    }
+
+    Ok(StatusCode::CREATED)
 }
