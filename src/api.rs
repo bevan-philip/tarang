@@ -11,10 +11,10 @@ use crate::{
     AppState,
     database::{
         self, Article, Category, DbError, Feed, create_category, create_feed, drop_category,
-        drop_feed, list_articles_for_feeds, list_categories, update_feed,
+        drop_feed, list_articles_for_feeds, list_categories, list_feeds, update_feed,
     },
     feed::{FeedError, get_feed_articles},
-    opml::{self, OpmlError},
+    opml::{self, OpmlError, export_opml},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -269,4 +269,11 @@ pub async fn upload_opml(
     }
 
     Ok(StatusCode::CREATED)
+}
+
+pub async fn get_opml(State(AppState { db, .. }): State<AppState>) -> Result<String, AppError> {
+    let feeds = list_feeds(&db).await?;
+    let categories = list_categories(&db).await?;
+
+    Ok(export_opml(feeds, categories).await?)
 }

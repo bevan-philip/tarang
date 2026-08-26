@@ -1,11 +1,8 @@
 use opml::{Body, Head, OPML, Outline};
 
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 
-use crate::{
-    database::{Category, Feed},
-    feed,
-};
+use crate::database::{Category, Feed};
 
 pub struct ImportedFeed {
     pub name: String,
@@ -57,7 +54,7 @@ pub async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlErro
     Ok(imported_feeds)
 }
 
-async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> Result<String, opml::Error> {
+pub async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> Result<String, OpmlError> {
     let mut outlines: Vec<Outline> = Vec::new();
 
     let mut feeds_by_category: HashMap<Option<i64>, Vec<Feed>> =
