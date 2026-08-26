@@ -28,7 +28,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
 }
 
 pub async fn parse_opml(opml_string: &str) -> OpmlResult<Vec<ImportedFeed>> {
-    let parsed = OPML::from_str(&opml_string)?;
+    let parsed = OPML::from_str(opml_string)?;
 
     let mut imported_feeds: Vec<ImportedFeed> = Vec::new();
 

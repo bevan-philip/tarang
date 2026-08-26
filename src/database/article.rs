@@ -34,8 +34,9 @@ pub async fn create_articles(
         return Ok(Vec::new());
     }
 
-    let mut qb: QueryBuilder<Sqlite> =
-        QueryBuilder::new("INSERT INTO article (feed, url, guid, title, content, summary, published_at) ");
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "INSERT INTO article (feed, url, guid, title, content, summary, published_at) ",
+    );
 
     qb.push_values(articles, |mut b, article| {
         b.push_bind(feed_pk)
