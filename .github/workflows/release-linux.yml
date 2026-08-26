@@ -1,0 +1,51 @@
+name: Release Linux binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  DATABASE_URL: sqlite://./ci.db
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features rustls,sqlite --locked
+
+      - name: Prepare CI database
+        run: |
+          cargo sqlx database create
+          cargo sqlx migrate run
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          tar czf tarang-linux-x86_64.tar.gz -C target/release tarang
+          sha256sum tarang-linux-x86_64.tar.gz > tarang-linux-x86_64.tar.gz.sha256
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            tarang-linux-x86_64.tar.gz \
+            tarang-linux-x86_64.tar.gz.sha256 \
+            --title "${{ inputs.tag }}" \
+            --generate-notes
