@@ -7,10 +7,12 @@ use std::str::FromStr;
 use std::time::Duration;
 
 mod article;
+mod article_state;
 mod category;
 mod feed;
 
 pub use article::*;
+pub use article_state::*;
 pub use category::*;
 pub use feed::*;
 

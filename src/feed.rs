@@ -4,7 +4,7 @@ use crate::database::Db;
 use crate::database::DbError;
 use crate::database::ParsedArticle;
 
-use feed_rs::{model::Entry, model::Feed, parser};
+use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
@@ -24,16 +24,37 @@ pub async fn update_feed_articles(
     feed_url: &str,
     client: &reqwest::Client,
 ) -> FeedResult<Vec<Article>> {
-    let articles = get_feed_articles(client, feed_url).await?;
+    let (_title, articles) = get_feed_articles(client, feed_url).await?;
     let db_entries = database::create_articles(db, feed_pk, &articles).await?;
 
     Ok(db_entries)
 }
 
+pub async fn create_feed_with_articles(
+    db: &Db,
+    http: &reqwest::Client,
+    name: Option<&str>,
+    url: &str,
+    category: Option<i64>,
+    metadata: Option<&str>,
+    refresh_interval: Option<i64>,
+) -> FeedResult<database::Feed> {
+    let (parsed_title, articles) = get_feed_articles(http, url).await?;
+    let name = name
+        .map(str::to_owned)
+        .or(parsed_title)
+        .unwrap_or_else(|| url.to_string());
+
+    let feed = database::create_feed(db, &name, url, category, metadata, refresh_interval).await?;
+    database::create_articles(db, feed.pk, &articles).await?;
+
+    Ok(feed)
+}
+
 pub async fn get_feed_articles(
     client: &reqwest::Client,
     feed_url: &str,
-) -> Result<Vec<ParsedArticle>, FeedError> {
+) -> Result<(Option<String>, Vec<ParsedArticle>), FeedError> {
     let res = client.get(feed_url).send().await?.text().await?;
     let feed = parser::Builder::new()
         .id_generator(|links, _title, _uri| {
@@ -41,10 +62,12 @@ pub async fn get_feed_articles(
         })
         .build()
         .parse(res.as_bytes())?;
-    Ok(process_feed(feed).await)
+    let title = feed.title.as_ref().map(|t| t.content.clone());
+    let articles = process_feed(feed).await;
+    Ok((title, articles))
 }
 
-async fn process_feed(feed: Feed) -> Vec<ParsedArticle> {
+async fn process_feed(feed: ParsedFeed) -> Vec<ParsedArticle> {
     let mut v: Vec<ParsedArticle> = Vec::new();
 
     for entry in feed.entries {

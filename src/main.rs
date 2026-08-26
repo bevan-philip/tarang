@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 mod api;
 mod database;
 mod feed;
+mod greader;
 mod opml;
 mod sync;
 
@@ -62,6 +63,7 @@ async fn main() {
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
         .route("/tarang/v1/opml", get(get_opml))
         .route("/tarang/v1/opml", post(upload_opml))
+        .nest("/greader", greader::router())
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());
 

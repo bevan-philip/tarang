@@ -8,11 +8,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::AppError;
 use crate::{
     AppState,
-    database::{
-        self, Article, DbError, Feed, create_feed, drop_feed, list_articles_for_feed, list_feed,
-        update_feed,
-    },
-    feed::get_feed_articles,
+    database::{Article, DbError, Feed, drop_feed, list_articles_for_feed, list_feed, update_feed},
+    feed::create_feed_with_articles,
 };
 
 #[derive(Serialize)]
@@ -53,12 +50,10 @@ pub async fn post_feed(
     State(AppState { db, http }): State<AppState>,
     Json(payload): Json<AddFeed>,
 ) -> Result<Json<AddFeedResp>, AppError> {
-    // Retrieve the articles first to see if the URL is valid.
-    let articles = get_feed_articles(&http, &payload.url).await?;
-
-    let feed = create_feed(
+    let feed = create_feed_with_articles(
         &db,
-        &payload.name,
+        &http,
+        Some(&payload.name),
         &payload.url,
         payload.category_id,
         payload.metadata.as_deref(),
@@ -66,10 +61,8 @@ pub async fn post_feed(
     )
     .await?;
 
-    database::create_articles(&db, feed.pk, &articles).await?;
-
     Ok(Json(AddFeedResp {
-        name: payload.name,
+        name: feed.name,
         id: feed.pk,
     }))
 }
