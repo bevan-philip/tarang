@@ -52,8 +52,8 @@ async fn main() {
         .route("/health", get(health))
         .route("/tarang/v1/app", get(get_app_state))
         .route("/tarang/v1/feed", post(post_feed))
-        .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category", get(get_category))
+        .route("/tarang/v1/category/{category_id}", post(post_category))
         .route(
             "/tarang/v1/feed/{feed_id}",
             delete(delete_feed).patch(patch_feed),
