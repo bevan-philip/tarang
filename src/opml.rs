@@ -13,8 +13,6 @@ pub struct ImportedFeed {
 pub enum OpmlError {
     #[error("failed to parse OPML: {0}")]
     Parse(#[from] opml::Error),
-    #[error("outline '{0}' is missing an xmlUrl")]
-    MissingUrl(String),
 }
 
 pub type OpmlResult<T> = Result<T, OpmlError>;
@@ -29,7 +27,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
     })
 }
 
-pub async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlError> {
+pub async fn parse_opml(opml_string: &str) -> OpmlResult<Vec<ImportedFeed>> {
     let parsed = OPML::from_str(&opml_string)?;
 
     let mut imported_feeds: Vec<ImportedFeed> = Vec::new();
@@ -54,7 +52,7 @@ pub async fn parse_opml(opml_string: &str) -> Result<Vec<ImportedFeed>, OpmlErro
     Ok(imported_feeds)
 }
 
-pub async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> Result<String, OpmlError> {
+pub async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlResult<String> {
     let mut outlines: Vec<Outline> = Vec::new();
 
     let mut feeds_by_category: HashMap<Option<i64>, Vec<Feed>> =
