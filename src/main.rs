@@ -1,6 +1,6 @@
 use crate::api::{
-    delete_category, delete_feed, get_app_state, get_category, get_opml, health, patch_feed,
-    post_category, post_feed, upload_opml,
+    delete_category, delete_feed, get_app_state, get_category, get_feed, get_opml, health,
+    patch_feed, post_category, post_feed, upload_opml,
 };
 use crate::database::Db;
 use axum::{
@@ -51,13 +51,14 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/tarang/v1/app", get(get_app_state))
+        .route("/tarang/v1/feed/{feed_id}", get(get_feed))
         .route("/tarang/v1/feed", post(post_feed))
-        .route("/tarang/v1/category", get(get_category))
-        .route("/tarang/v1/category/{category_id}", post(post_category))
         .route(
             "/tarang/v1/feed/{feed_id}",
             delete(delete_feed).patch(patch_feed),
         )
+        .route("/tarang/v1/category", get(get_category))
+        .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
         .route("/tarang/v1/opml", get(get_opml))
         .route("/tarang/v1/opml", post(upload_opml))

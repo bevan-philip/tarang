@@ -18,6 +18,8 @@ pub use feed::*;
 pub enum DbError {
     #[error("already exists: {0}")]
     AlreadyExists(String),
+    #[error("doesn't exist: {0}")]
+    NotFound(String),
     #[error(transparent)]
     Sqlx(sqlx::Error),
     #[error(transparent)]

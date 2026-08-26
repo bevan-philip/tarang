@@ -5,13 +5,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{collections::HashMap, ops::Add, str::Utf8Error};
+use std::{collections::HashMap, str::Utf8Error};
 
 use crate::{
     AppState,
     database::{
         self, Article, Category, DbError, Feed, create_category, create_feed, drop_category,
-        drop_feed, list_articles_for_feeds, list_categories, list_feeds, update_feed,
+        drop_feed, list_articles_for_feed, list_articles_for_feeds, list_categories, list_feed,
+        list_feeds, update_feed,
     },
     feed::{FeedError, get_feed_articles},
     opml::{self, OpmlError, export_opml},
@@ -99,6 +100,25 @@ pub async fn get_app_state(
         categories,
         feeds: feed_with_articles,
     }))
+}
+
+#[derive(Serialize)]
+pub struct GetFeed {
+    id: i64,
+    feed: Feed,
+    articles: Vec<Article>,
+}
+
+pub async fn get_feed(
+    State(AppState { db, .. }): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<GetFeed>, AppError> {
+    let feed = list_feed(&db, id)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("feed {id} not found")))?;
+    let articles = list_articles_for_feed(&db, id).await?;
+
+    Ok(Json(GetFeed { id, feed, articles }))
 }
 
 #[derive(Deserialize)]

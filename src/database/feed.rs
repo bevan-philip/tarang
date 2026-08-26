@@ -42,6 +42,19 @@ pub async fn create_feed(
     Ok(feed)
 }
 
+pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
+    let feed = sqlx::query_as!(
+        Feed,
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
+           FROM feed WHERE pk = ?"#,
+        pk,
+    )
+    .fetch_optional(&db.read)
+    .await?;
+
+    Ok(feed)
+}
+
 pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
