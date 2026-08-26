@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{collections::HashMap, str::Utf8Error};
+use std::{collections::HashMap, ops::Add, str::Utf8Error};
 
 use crate::{
     AppState,
@@ -211,7 +211,7 @@ pub async fn patch_feed(
 }
 
 pub async fn upload_opml(
-    State(AppState { db, .. }): State<AppState>,
+    State(AppState { db, http }): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<StatusCode, AppError> {
     while let Some(field) = multipart.next_field().await? {
@@ -226,7 +226,21 @@ pub async fn upload_opml(
 
         for feed in feeds {
             let Some(category) = feed.category.as_deref() else {
-                database::create_feed(&db, &feed.name, &feed.url, None, None, None).await?;
+                let add_feed = AddFeed {
+                    name: feed.name,
+                    url: feed.url,
+                    category_id: None,
+                    metadata: None,
+                    refresh_interval: None,
+                };
+                let _ = post_feed(
+                    State(AppState {
+                        db: db.clone(),
+                        http: http.clone(),
+                    }),
+                    Json(add_feed),
+                )
+                .await;
 
                 continue;
             };
@@ -235,15 +249,22 @@ pub async fn upload_opml(
                 let new_category = database::create_category(&db, category).await?;
                 category_map.insert(new_category.name, new_category.pk);
             }
-            database::create_feed(
-                &db,
-                &feed.name,
-                &feed.url,
-                Some(category_map[category]),
-                Some(&String::from("")),
-                Some(360),
+
+            let add_feed = AddFeed {
+                name: feed.name,
+                url: feed.url,
+                category_id: Some(category_map[&feed.category.unwrap()]),
+                metadata: None,
+                refresh_interval: None,
+            };
+            let _ = post_feed(
+                State(AppState {
+                    db: db.clone(),
+                    http: http.clone(),
+                }),
+                Json(add_feed),
             )
-            .await?;
+            .await;
         }
     }
 
