@@ -7,15 +7,17 @@ use axum::{
     Router,
     routing::{delete, get, post},
 };
-use std::time::Duration;
 use tower_http::cors::CorsLayer;
 
 mod api;
+mod config;
 mod database;
 mod feed;
 mod greader;
 mod opml;
 mod sync;
+
+use config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,18 +31,23 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let db = database::config().await.expect("failed to initialise db");
+    let config = Config::load().expect("failed to load config.toml");
+
+    let db = database::config(&config.database.path, config.database.busy_timeout())
+        .await
+        .expect("failed to initialise db");
 
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(config.http.timeout())
         .build()
         .expect("failed to build http client");
 
     let sync_db = db.clone();
     let sync_http = http.clone();
+    let sync_interval = config.sync.poll_interval();
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        let mut interval = tokio::time::interval(sync_interval);
         loop {
             if let Err(e) = sync::sync_feeds(&sync_db, &sync_http).await {
                 tracing::error!(error = %e, "sync_feeds failed");
@@ -67,10 +74,12 @@ async fn main() {
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .expect("failed to bind to 127.0.0.1:3000");
+    let bind_addr = config.server.bind_addr();
 
-    println!("listening on http://127.0.0.1:3000");
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .unwrap_or_else(|_| panic!("failed to bind to {bind_addr}"));
+
+    println!("listening on http://{bind_addr}");
     axum::serve(listener, app).await.expect("server crashed");
 }

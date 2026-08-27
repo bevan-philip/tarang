@@ -47,12 +47,12 @@ pub struct Db {
     pub write: SqlitePool,
 }
 
-pub async fn config() -> DbResult<Db> {
-    let base_opts = SqliteConnectOptions::from_str("sqlite://app.db")?
+pub async fn config(db_path: &str, busy_timeout: Duration) -> DbResult<Db> {
+    let base_opts = SqliteConnectOptions::from_str(&format!("sqlite://{db_path}"))?
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5))
+        .busy_timeout(busy_timeout)
         .pragma("cache_size", "-20000")
         .pragma("temp_store", "MEMORY");
 
