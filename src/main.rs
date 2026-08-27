@@ -1,5 +1,5 @@
 use crate::api::{
-    delete_category, delete_feed, get_app_state, get_category, get_feed, get_opml, health,
+    delete_category, delete_feed, get_category, get_feed, get_opml, get_summary, health,
     patch_feed, post_category, post_feed, upload_opml,
 };
 use crate::database::Db;
@@ -51,7 +51,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/tarang/v1/app", get(get_app_state))
+        .route("/tarang/v1/summary", get(get_summary))
         .route("/tarang/v1/feed/{feed_id}", get(get_feed))
         .route("/tarang/v1/feed", post(post_feed))
         .route(

@@ -8,17 +8,17 @@ use std::str::Utf8Error;
 
 use crate::{database::DbError, feed::FeedError, opml::OpmlError};
 
-mod app_state;
 mod category;
 mod feed;
 mod health;
 mod opml;
+mod summary;
 
-pub use app_state::*;
 pub use category::*;
 pub use feed::*;
 pub use health::*;
 pub use opml::*;
+pub use summary::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {

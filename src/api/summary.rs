@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Serialize)]
-pub struct InitialState {
+pub struct Summary {
     categories: Vec<Category>,
     feeds: Vec<FeedOutline>,
 }
@@ -22,9 +22,9 @@ pub struct FeedOutline {
     articles: Vec<Article>,
 }
 
-pub async fn get_app_state(
+pub async fn get_summary(
     State(AppState { db, .. }): State<AppState>,
-) -> Result<Json<InitialState>, AppError> {
+) -> Result<Json<Summary>, AppError> {
     let feeds = database::list_feeds(&db).await?;
 
     let categories = database::list_categories(&db).await?;
@@ -51,7 +51,7 @@ pub async fn get_app_state(
         })
         .collect();
 
-    Ok(Json(InitialState {
+    Ok(Json(Summary {
         categories,
         feeds: feed_with_articles,
     }))
