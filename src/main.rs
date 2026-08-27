@@ -10,6 +10,7 @@ use axum::{
 use tower_http::cors::CorsLayer;
 
 mod api;
+mod backup;
 mod config;
 mod database;
 mod feed;
@@ -46,12 +47,29 @@ async fn main() {
     let sync_http = http.clone();
     let sync_interval = config.sync.poll_interval();
 
+    let backup_enabled = config.backup.enabled;
+    let backup_every_n_polls = config.backup.every_n_polls;
+    let backup_path = config.backup.path.clone();
+    let backup_db = db.clone();
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(sync_interval);
+        let mut polls_since_backup: u32 = 0;
         loop {
             if let Err(e) = sync::sync_feeds(&sync_db, &sync_http).await {
                 tracing::error!(error = %e, "sync_feeds failed");
             }
+
+            if backup_enabled && backup_every_n_polls > 0 {
+                polls_since_backup += 1;
+                if polls_since_backup >= backup_every_n_polls {
+                    polls_since_backup = 0;
+                    if let Err(e) = backup::backup_database(&backup_db, &backup_path).await {
+                        tracing::error!(error = %e, "backup_database failed");
+                    }
+                }
+            }
+
             interval.tick().await;
         }
     });

@@ -2,4 +2,6 @@
 /app.db
 /app.db-shm
 /app.db-wal
+/backup.db
+/backup.db.tmp
 /.env

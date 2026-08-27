@@ -18,6 +18,7 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub http: HttpConfig,
     pub sync: SyncConfig,
+    pub backup: BackupConfig,
 }
 
 impl Config {
@@ -112,5 +113,28 @@ impl Default for SyncConfig {
 impl SyncConfig {
     pub fn poll_interval(&self) -> Duration {
         Duration::from_secs(self.poll_interval_secs)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct BackupConfig {
+    /// Whether periodic backups are enabled. Off by default.
+    pub enabled: bool,
+    /// Number of poll intervals between backups (a backup runs after every
+    /// Nth poll completes). 0 disables backups regardless of `enabled`.
+    pub every_n_polls: u32,
+    /// Destination file for the backup. Overwritten on every run. The
+    /// parent directory is NOT created automatically — it must exist.
+    pub path: String,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        BackupConfig {
+            enabled: false,
+            every_n_polls: 12,
+            path: "backup.db".to_string(),
+        }
     }
 }
