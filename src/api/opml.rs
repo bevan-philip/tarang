@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::{
     AppError,
-    feed::{AddFeed, post_feed},
+    feed::{PostFeedReq, post_feed},
 };
 use crate::{
     AppState,
@@ -31,7 +31,7 @@ pub async fn upload_opml(
 
         for feed in feeds {
             let Some(category) = feed.category.as_deref() else {
-                let add_feed = AddFeed {
+                let add_feed = PostFeedReq {
                     name: feed.name,
                     url: feed.url,
                     category_id: None,
@@ -55,7 +55,7 @@ pub async fn upload_opml(
                 category_map.insert(new_category.name, new_category.pk);
             }
 
-            let add_feed = AddFeed {
+            let add_feed = PostFeedReq {
                 name: feed.name,
                 url: feed.url,
                 category_id: Some(category_map[&feed.category.unwrap()]),

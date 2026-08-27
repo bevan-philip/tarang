@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 
-use super::{AppError, feed::AddFeedResp};
+use super::{AppError, feed::PostFeedResp};
 use crate::{
     AppState,
     database::{Category, create_category, drop_category, list_categories},
@@ -13,9 +13,9 @@ use crate::{
 pub async fn post_category(
     State(AppState { db, .. }): State<AppState>,
     Path(name): Path<String>,
-) -> Result<Json<AddFeedResp>, AppError> {
+) -> Result<Json<PostFeedResp>, AppError> {
     let category = create_category(&db, &name).await?;
-    Ok(Json(AddFeedResp {
+    Ok(Json(PostFeedResp {
         name,
         id: category.pk,
     }))

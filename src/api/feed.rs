@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::AppError;
 use crate::{
@@ -32,7 +32,7 @@ pub async fn get_feed(
 }
 
 #[derive(Deserialize)]
-pub struct AddFeed {
+pub struct PostFeedReq {
     pub name: String,
     pub url: String,
     pub category_id: Option<i64>,
@@ -41,15 +41,15 @@ pub struct AddFeed {
 }
 
 #[derive(Serialize)]
-pub struct AddFeedResp {
+pub struct PostFeedResp {
     pub name: String,
     pub id: i64,
 }
 
 pub async fn post_feed(
     State(AppState { db, http }): State<AppState>,
-    Json(payload): Json<AddFeed>,
-) -> Result<Json<AddFeedResp>, AppError> {
+    Json(payload): Json<PostFeedReq>,
+) -> Result<Json<PostFeedResp>, AppError> {
     let feed = create_feed_with_articles(
         &db,
         &http,
@@ -61,7 +61,7 @@ pub async fn post_feed(
     )
     .await?;
 
-    Ok(Json(AddFeedResp {
+    Ok(Json(PostFeedResp {
         name: feed.name,
         id: feed.pk,
     }))
@@ -76,26 +76,18 @@ pub async fn delete_feed(
 }
 
 #[derive(Deserialize)]
-pub struct PatchFeed {
+pub struct PatchFeedReq {
     name: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_some")]
+    #[serde(default, with = "::serde_with::rust::double_option")]
     category_id: Option<Option<i64>>,
-}
-
-fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    Deserialize::deserialize(deserializer).map(Some)
 }
 
 pub async fn patch_feed(
     State(AppState { db, .. }): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<PatchFeed>,
+    Json(payload): Json<PatchFeedReq>,
 ) -> Result<Json<Feed>, AppError> {
     let feed = update_feed(
         &db,
