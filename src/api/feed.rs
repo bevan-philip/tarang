@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use super::AppError;
 use crate::{
     AppState,
-    database::{Article, DbError, Feed, drop_feed, list_articles_for_feed, list_feed, update_feed},
+    database::{
+        Article, DbError, Feed, StarredArticlesWithFeed, drop_feed, list_articles_for_feed,
+        list_feed, list_starred_articles_with_feed, update_feed,
+    },
     feed::create_feed_with_articles,
 };
 
@@ -100,4 +103,11 @@ pub async fn patch_feed(
     .await?;
 
     Ok(Json(feed))
+}
+
+pub async fn get_starred_articles(
+    State(AppState { db, .. }): State<AppState>,
+) -> Result<Json<Vec<StarredArticlesWithFeed>>, AppError> {
+    let articles = list_starred_articles_with_feed(&db).await?;
+    Ok(Json(articles))
 }

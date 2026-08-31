@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT feed.pk, article.url, article.content\n           FROM article\n           JOIN feed ON feed.pk = article.feed\n           LEFT JOIN  article_state ON article_state.article = article.pk\n           WHERE article_state.is_starred = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "content"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d358134db0bb50422073ce948af1611d7088c40f4fa2e95ebf432ae09d53f52a"
+}

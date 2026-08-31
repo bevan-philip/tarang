@@ -138,3 +138,45 @@ pub async fn list_unread_counts_by_category(db: &Db) -> DbResult<Vec<CategoryUnr
 
     Ok(rows)
 }
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+pub struct StarredArticles {
+    pub url: String,
+    pub content: String,
+}
+
+pub async fn list_starred_articles(db: &Db) -> DbResult<Vec<StarredArticles>> {
+    let rows = sqlx::query_as!(
+        StarredArticles,
+        r#"SELECT article.url, article.content
+           FROM article
+           LEFT JOIN  article_state ON article_state.article = article.pk
+           WHERE article_state.is_starred = 1"#
+    )
+    .fetch_all(&db.read)
+    .await?;
+
+    Ok(rows)
+}
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+pub struct StarredArticlesWithFeed {
+    pub pk: i64,
+    pub url: String,
+    pub content: String,
+}
+
+pub async fn list_starred_articles_with_feed(db: &Db) -> DbResult<Vec<StarredArticlesWithFeed>> {
+    let rows = sqlx::query_as!(
+        StarredArticlesWithFeed,
+        r#"SELECT feed.pk, article.url, article.content
+           FROM article
+           JOIN feed ON feed.pk = article.feed
+           LEFT JOIN  article_state ON article_state.article = article.pk
+           WHERE article_state.is_starred = 1"#
+    )
+    .fetch_all(&db.read)
+    .await?;
+
+    Ok(rows)
+}

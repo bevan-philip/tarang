@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT article.url, article.content\n           FROM article\n           LEFT JOIN  article_state ON article_state.article = article.pk\n           WHERE article_state.is_starred = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "url",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "content",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "content"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a7ecda2e667cf9894045cf11db1c90d2e8d9f5e8abfeaa9ba511496a06c51a12"
+}

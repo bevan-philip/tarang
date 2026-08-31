@@ -1,6 +1,6 @@
 use crate::api::{
-    delete_category, delete_feed, get_category, get_feed, get_opml, get_summary, health,
-    patch_feed, post_category, post_feed, upload_opml,
+    delete_category, delete_feed, get_category, get_export_starred_articles, get_feed, get_opml,
+    get_starred_articles, get_summary, health, patch_feed, post_category, post_feed, upload_opml,
 };
 use crate::database::Db;
 use axum::{
@@ -86,8 +86,13 @@ async fn main() {
         .route("/tarang/v1/category", get(get_category))
         .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
+        .route("/tarang/v1/starred", get(get_starred_articles))
         .route("/tarang/v1/opml", get(get_opml))
         .route("/tarang/v1/opml", post(upload_opml))
+        .route(
+            "/tarang/v1/export/starred",
+            get(get_export_starred_articles),
+        )
         .nest("/greader", greader::router())
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());

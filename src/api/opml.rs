@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     AppState,
-    database::{self, list_categories, list_feeds},
+    database::{self, StarredArticles, list_categories, list_feeds, list_starred_articles},
     opml::{self, export_opml},
 };
 
@@ -81,4 +81,12 @@ pub async fn get_opml(State(AppState { db, .. }): State<AppState>) -> Result<Str
     let categories = list_categories(&db).await?;
 
     Ok(export_opml(feeds, categories).await?)
+}
+
+pub async fn get_export_starred_articles(
+    State(AppState { db, .. }): State<AppState>,
+) -> Result<Json<Vec<StarredArticles>>, AppError> {
+    let articles = list_starred_articles(&db).await?;
+
+    Ok(Json(articles))
 }
