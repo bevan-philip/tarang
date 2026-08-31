@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"count!: i64\" FROM article\n           LEFT JOIN article_state ON article_state.article = article.pk\n           WHERE article_state.article IS NULL OR article_state.is_read = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7a8462c58949ae8f3e28fe28ea777a277a9a1402bd68b1726da5fb362ef37e89"
+}

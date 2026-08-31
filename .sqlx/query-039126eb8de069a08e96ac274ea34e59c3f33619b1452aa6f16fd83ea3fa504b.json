@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO article_state (article, is_read)\n           SELECT pk, 1 FROM article WHERE published_at <= ?\n           ON CONFLICT(article) DO UPDATE SET is_read = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "039126eb8de069a08e96ac274ea34e59c3f33619b1452aa6f16fd83ea3fa504b"
+}
