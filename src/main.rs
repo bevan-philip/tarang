@@ -87,8 +87,8 @@ async fn main() {
         .route("/tarang/v1/category/{category_id}", post(post_category))
         .route("/tarang/v1/category/{category_id}", delete(delete_category))
         .route("/tarang/v1/starred", get(get_starred_articles))
-        .route("/tarang/v1/opml", get(get_opml))
-        .route("/tarang/v1/opml", post(upload_opml))
+        .route("/tarang/v1/export/opml", get(get_opml))
+        .route("/tarang/v1/export/opml", post(upload_opml))
         .route(
             "/tarang/v1/export/starred",
             get(get_export_starred_articles),

@@ -9,15 +9,15 @@ use std::str::Utf8Error;
 use crate::{database::DbError, feed::FeedError, opml::OpmlError};
 
 mod category;
+mod export;
 mod feed;
 mod health;
-mod opml;
 mod summary;
 
 pub use category::*;
+pub use export::*;
 pub use feed::*;
 pub use health::*;
-pub use opml::*;
 pub use summary::*;
 
 #[derive(Debug, thiserror::Error)]
