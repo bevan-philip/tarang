@@ -1,4 +1,5 @@
-use super::{Db, DbResult};
+use super::{Db, DbResult, clear_matches_for_articles, record_filter_matches};
+use crate::filter::CompiledFilter;
 use chrono::Utc;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
@@ -29,6 +30,7 @@ pub async fn create_articles(
     db: &Db,
     feed_pk: i64,
     articles: &[ParsedArticle],
+    filters: &[CompiledFilter],
 ) -> DbResult<Vec<Article>> {
     if articles.is_empty() {
         return Ok(Vec::new());
@@ -61,14 +63,40 @@ pub async fn create_articles(
 
     let inserted = qb.build_query_as::<Article>().fetch_all(&db.write).await?;
 
+    // Recompute (not append): ON CONFLICT means a "new" row may be a
+    // re-fetch whose content changed, so a previously-matched article that
+    // no longer matches must not stay hidden.
+    let pks: Vec<i64> = inserted.iter().map(|a| a.pk).collect();
+    clear_matches_for_articles(db, &pks).await?;
+    record_filter_matches(db, &inserted, filters).await?;
+
     Ok(inserted)
+}
+
+pub async fn list_all_articles(db: &Db) -> DbResult<Vec<Article>> {
+    let articles = sqlx::query_as!(
+        Article,
+        r#"SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at
+           FROM article"#,
+    )
+    .fetch_all(&db.read)
+    .await?;
+
+    Ok(articles)
 }
 
 pub async fn list_articles_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<Article>> {
     let articles = sqlx::query_as!(
         Article,
         r#"SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at
-           FROM article WHERE feed = ? ORDER BY published_at DESC"#,
+           FROM article
+           WHERE feed = ?
+             AND NOT EXISTS (
+                 SELECT 1 FROM article_filter_match afm
+                 JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
+                 WHERE afm.article = article.pk
+             )
+           ORDER BY published_at DESC"#,
         feed_pk,
     )
     .fetch_all(&db.read)
@@ -131,6 +159,14 @@ const ARTICLE_WITH_STATE_COLUMNS: &str = r#"
     COALESCE(article_state.is_starred, 0) as is_starred
 "#;
 
+/// Strict exclusion: hides any article with an enabled matching filter,
+/// with no starred bypass. Used everywhere except star-specific views.
+const FILTER_EXCLUSION: &str = r#" AND NOT EXISTS (
+        SELECT 1 FROM article_filter_match afm
+        JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
+        WHERE afm.article = article.pk
+    )"#;
+
 pub async fn list_articles_by_query(db: &Db, q: &ArticleQuery) -> DbResult<Vec<ArticleWithState>> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT ");
     qb.push(ARTICLE_WITH_STATE_COLUMNS);
@@ -153,6 +189,11 @@ pub async fn list_articles_by_query(db: &Db, q: &ArticleQuery) -> DbResult<Vec<A
     }
     if q.starred_only {
         qb.push(" AND article_state.is_starred = 1");
+    } else {
+        // Starred-only result sets are already all-starred, which is
+        // exactly the "starring bypasses the filter" case for this path -
+        // so the exclusion only applies when we're not in that mode.
+        qb.push(FILTER_EXCLUSION);
     }
     if let Some(after) = q.published_after {
         qb.push(" AND article.published_at > ").push_bind(after);
@@ -184,6 +225,18 @@ pub async fn list_articles_by_query(db: &Db, q: &ArticleQuery) -> DbResult<Vec<A
     Ok(articles)
 }
 
+/// Starred-bypass exclusion: hides a filtered article unless it's starred.
+/// Used by list_articles_by_pks, which has no caller-supplied "mode" - the
+/// bypass has to be decided per-row from the article's own starred state.
+const FILTER_EXCLUSION_UNLESS_STARRED: &str = r#" AND (
+        COALESCE(article_state.is_starred, 0) = 1
+        OR NOT EXISTS (
+            SELECT 1 FROM article_filter_match afm
+            JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
+            WHERE afm.article = article.pk
+        )
+    )"#;
+
 pub async fn list_articles_by_pks(db: &Db, pks: &[i64]) -> DbResult<Vec<ArticleWithState>> {
     if pks.is_empty() {
         return Ok(Vec::new());
@@ -200,6 +253,8 @@ pub async fn list_articles_by_pks(db: &Db, pks: &[i64]) -> DbResult<Vec<ArticleW
         separated.push_bind(pk);
     }
     qb.push(")");
+
+    qb.push(FILTER_EXCLUSION_UNLESS_STARRED);
 
     let articles = qb
         .build_query_as::<ArticleWithState>()

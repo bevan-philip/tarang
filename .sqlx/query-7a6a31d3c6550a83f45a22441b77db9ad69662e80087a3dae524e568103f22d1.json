@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pk, name, field, match_type, pattern, enabled as \"enabled: bool\", created_at FROM filter ORDER BY pk",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "field",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "field"
+          }
+        }
+      },
+      {
+        "name": "match_type",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "match_type"
+          }
+        }
+      },
+      {
+        "name": "pattern",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "pattern"
+          }
+        }
+      },
+      {
+        "name": "enabled: bool",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7a6a31d3c6550a83f45a22441b77db9ad69662e80087a3dae524e568103f22d1"
+}

@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE filter\n           SET name       = COALESCE(?, name),\n               field      = COALESCE(?, field),\n               match_type = COALESCE(?, match_type),\n               pattern    = COALESCE(?, pattern),\n               enabled    = COALESCE(?, enabled)\n           WHERE pk = ?\n           RETURNING pk, name, field, match_type, pattern, enabled as \"enabled: bool\", created_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "field",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "field"
+          }
+        }
+      },
+      {
+        "name": "match_type",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "match_type"
+          }
+        }
+      },
+      {
+        "name": "pattern",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "pattern"
+          }
+        }
+      },
+      {
+        "name": "enabled: bool",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9b2cd596a2fcb26c6adc07906733a2b2e8edf9bdf9a8767387739511f758d130"
+}

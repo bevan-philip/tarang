@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM article_filter_match WHERE filter = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1e566a759b4287a1d03021467ecaace6f5fa26f2a2e6478d4b03e62d4f32e9e9"
+}

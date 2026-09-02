@@ -3,6 +3,7 @@ use crate::database::Article;
 use crate::database::Db;
 use crate::database::DbError;
 use crate::database::ParsedArticle;
+use crate::filter::{self, CompiledFilter};
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
 
@@ -23,9 +24,10 @@ pub async fn update_feed_articles(
     feed_pk: i64,
     feed_url: &str,
     client: &reqwest::Client,
+    filters: &[CompiledFilter],
 ) -> FeedResult<Vec<Article>> {
     let (_title, articles) = get_feed_articles(client, feed_url).await?;
-    let db_entries = database::create_articles(db, feed_pk, &articles).await?;
+    let db_entries = database::create_articles(db, feed_pk, &articles, filters).await?;
 
     Ok(db_entries)
 }
@@ -46,7 +48,8 @@ pub async fn create_feed_with_articles(
         .unwrap_or_else(|| url.to_string());
 
     let feed = database::create_feed(db, &name, url, category, metadata, refresh_interval).await?;
-    database::create_articles(db, feed.pk, &articles).await?;
+    let filters = filter::load_compiled_filters(db).await?;
+    database::create_articles(db, feed.pk, &articles, &filters).await?;
 
     Ok(feed)
 }

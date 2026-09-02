@@ -11,12 +11,14 @@ use crate::{database::DbError, feed::FeedError, opml::OpmlError};
 mod category;
 mod export;
 mod feed;
+mod filter;
 mod health;
 mod summary;
 
 pub use category::*;
 pub use export::*;
 pub use feed::*;
+pub use filter::*;
 pub use health::*;
 pub use summary::*;
 
@@ -32,6 +34,8 @@ pub enum AppError {
     UploadBytes(#[from] Utf8Error),
     #[error(transparent)]
     ParseOpml(#[from] OpmlError),
+    #[error(transparent)]
+    InvalidFilterPattern(#[from] regex::Error),
 }
 
 impl IntoResponse for AppError {
@@ -40,6 +44,10 @@ impl IntoResponse for AppError {
             AppError::Db(DbError::AlreadyExists(msg)) => {
                 tracing::warn!(error = %self, "request rejected");
                 (StatusCode::CONFLICT, msg.clone())
+            }
+            AppError::InvalidFilterPattern(_) => {
+                tracing::warn!(error = %self, "request rejected");
+                (StatusCode::BAD_REQUEST, self.to_string())
             }
             other => {
                 tracing::error!(error = %other, "request failed");

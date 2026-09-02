@@ -2399,6 +2399,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "opml",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

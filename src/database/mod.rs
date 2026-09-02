@@ -10,11 +10,13 @@ mod article;
 mod article_state;
 mod category;
 mod feed;
+mod filter;
 
 pub use article::*;
 pub use article_state::*;
 pub use category::*;
 pub use feed::*;
+pub use filter::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
