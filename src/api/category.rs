@@ -1,8 +1,8 @@
 use axum::{
-    Json,
     extract::{Path, State},
     http::StatusCode,
 };
+use axum_jsonschema::Json;
 
 use super::{AppError, feed::PostFeedResp};
 use crate::{

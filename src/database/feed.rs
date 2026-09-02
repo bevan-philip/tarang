@@ -1,12 +1,14 @@
 use super::{Db, DbResult};
+use schemars::JsonSchema;
 use serde::Serialize;
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Feed {
     pub pk: i64,
     pub name: String,
     pub url: String,
     #[serde(rename = "category_id")]
+    #[schemars(rename = "category_id")]
     pub category: Option<i64>,
     pub metadata: String,
     pub refresh_interval: i64,

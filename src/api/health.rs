@@ -1,5 +1,14 @@
-use axum::Json;
+use axum_jsonschema::Json;
+use schemars::JsonSchema;
+use serde::Serialize;
 
-pub async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok" }))
+#[derive(Serialize, JsonSchema)]
+pub struct HealthResponse {
+    status: String,
+}
+
+pub async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_string(),
+    })
 }

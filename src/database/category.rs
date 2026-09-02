@@ -1,7 +1,8 @@
 use super::{Db, DbResult};
+use schemars::JsonSchema;
 use serde::Serialize;
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Category {
     pub pk: i64,
     pub name: String,

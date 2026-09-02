@@ -1,4 +1,6 @@
-use axum::{Json, extract::State};
+use axum::extract::State;
+use axum_jsonschema::Json;
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -8,15 +10,16 @@ use crate::{
     database::{self, Article, Category, Feed, list_articles_for_feeds},
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct Summary {
     categories: Vec<Category>,
     feeds: Vec<FeedOutline>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct FeedOutline {
     #[serde(flatten)]
+    #[schemars(flatten)]
     feed: Feed,
     category: Option<Category>,
     articles: Vec<Article>,

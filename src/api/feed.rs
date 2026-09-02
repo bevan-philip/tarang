@@ -1,8 +1,9 @@
 use axum::{
-    Json,
     extract::{Path, State},
     http::StatusCode,
 };
+use axum_jsonschema::Json;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::AppError;
@@ -15,7 +16,7 @@ use crate::{
     feed::create_feed_with_articles,
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct GetFeed {
     id: i64,
     feed: Feed,
@@ -34,7 +35,7 @@ pub async fn get_feed(
     Ok(Json(GetFeed { id, feed, articles }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub struct PostFeedReq {
     pub name: String,
     pub url: String,
@@ -43,7 +44,7 @@ pub struct PostFeedReq {
     pub refresh_interval: Option<i64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct PostFeedResp {
     pub name: String,
     pub id: i64,
@@ -78,12 +79,13 @@ pub async fn delete_feed(
     Ok(StatusCode::OK)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub struct PatchFeedReq {
     name: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
     #[serde(default, with = "::serde_with::rust::double_option")]
+    #[schemars(with = "Option<i64>")]
     category_id: Option<Option<i64>>,
 }
 

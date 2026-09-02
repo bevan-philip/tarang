@@ -1,8 +1,8 @@
 use axum::{
-    Json,
     extract::{Multipart, State},
     http::StatusCode,
 };
+use axum_jsonschema::Json;
 use std::collections::HashMap;
 
 use super::{

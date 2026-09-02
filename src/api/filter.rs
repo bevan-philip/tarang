@@ -1,8 +1,9 @@
 use axum::{
-    Json,
     extract::{Path, State},
     http::StatusCode,
 };
+use axum_jsonschema::Json;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::AppError;
@@ -12,7 +13,7 @@ use crate::{
     filter::{self, MatchType},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub struct PostFilterReq {
     pub name: String,
     #[serde(default)]
@@ -49,7 +50,7 @@ pub async fn get_filter(
     Ok(Json(database::list_filters(&db).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub struct PatchFilterReq {
     pub name: Option<String>,
     pub field: Option<String>,

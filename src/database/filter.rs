@@ -1,9 +1,10 @@
 use super::{Article, Db, DbResult};
 use crate::filter::{self, CompiledFilter};
+use schemars::JsonSchema;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Filter {
     pub pk: i64,
     pub name: String,

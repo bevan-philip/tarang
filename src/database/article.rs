@@ -1,10 +1,11 @@
 use super::{Db, DbResult, clear_matches_for_articles, record_filter_matches};
 use crate::filter::CompiledFilter;
 use chrono::Utc;
+use schemars::JsonSchema;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Article {
     pub pk: i64,
     pub feed: i64,

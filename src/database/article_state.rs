@@ -1,4 +1,5 @@
 use super::{Db, DbResult};
+use schemars::JsonSchema;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
 
@@ -154,7 +155,7 @@ pub async fn list_unread_counts_by_category(db: &Db) -> DbResult<Vec<CategoryUnr
     Ok(rows)
 }
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct StarredArticles {
     pub url: String,
     pub content: String,
@@ -174,7 +175,7 @@ pub async fn list_starred_articles(db: &Db) -> DbResult<Vec<StarredArticles>> {
     Ok(rows)
 }
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct StarredArticlesWithFeed {
     pub pk: i64,
     pub url: String,

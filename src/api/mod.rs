@@ -38,6 +38,14 @@ pub enum AppError {
     InvalidFilterPattern(#[from] regex::Error),
 }
 
+// aide's blanket `OperationOutput for Result<T, E>` impl requires `E:
+// OperationOutput` as well as `T`, even though we don't want AppError
+// documented as a response - the default trait methods are no-ops, so this
+// satisfies the bound without adding anything to the generated spec.
+impl aide::OperationOutput for AppError {
+    type Inner = Self;
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {

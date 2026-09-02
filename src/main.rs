@@ -4,10 +4,16 @@ use crate::api::{
     patch_filter, post_category, post_feed, post_filter, upload_opml,
 };
 use crate::database::Db;
-use axum::{
-    Router,
-    routing::{delete, get, patch, post},
+use aide::{
+    axum::{
+        ApiRouter,
+        routing::{delete_with, get_with, patch_with, post_with},
+    },
+    openapi::OpenApi,
+    swagger::Swagger,
 };
+use axum::{Json, extract::Extension, routing::get};
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 mod api;
@@ -76,31 +82,91 @@ async fn main() {
         }
     });
 
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/tarang/v1/summary", get(get_summary))
-        .route("/tarang/v1/feed/{feed_id}", get(get_feed))
-        .route("/tarang/v1/feed", post(post_feed))
-        .route(
+    let mut api = OpenApi::default();
+
+    let documented = ApiRouter::new()
+        .api_route("/health", get_with(health, |op| op.summary("Health check")))
+        .api_route(
+            "/tarang/v1/summary",
+            get_with(get_summary, |op| {
+                op.summary("Get a summary of categories, feeds, and their recent articles")
+            }),
+        )
+        .api_route(
             "/tarang/v1/feed/{feed_id}",
-            delete(delete_feed).patch(patch_feed),
+            get_with(get_feed, |op| op.summary("Get a feed and its articles")),
         )
-        .route("/tarang/v1/category", get(get_category))
-        .route("/tarang/v1/category/{category_id}", post(post_category))
-        .route("/tarang/v1/category/{category_id}", delete(delete_category))
-        .route("/tarang/v1/filter", get(get_filter).post(post_filter))
-        .route(
+        .api_route(
+            "/tarang/v1/feed",
+            post_with(post_feed, |op| op.summary("Add a new feed")),
+        )
+        .api_route(
+            "/tarang/v1/feed/{feed_id}",
+            delete_with(delete_feed, |op| op.summary("Delete a feed"))
+                .patch_with(patch_feed, |op| op.summary("Update a feed")),
+        )
+        .api_route(
+            "/tarang/v1/category",
+            get_with(get_category, |op| op.summary("List categories")),
+        )
+        .api_route(
+            "/tarang/v1/category/{category_id}",
+            post_with(post_category, |op| {
+                op.summary("Create a category")
+                    .description("The path segment is the category's name, not an id")
+            }),
+        )
+        .api_route(
+            "/tarang/v1/category/{category_id}",
+            delete_with(delete_category, |op| op.summary("Delete a category")),
+        )
+        .api_route(
+            "/tarang/v1/filter",
+            get_with(get_filter, |op| op.summary("List filters"))
+                .post_with(post_filter, |op| op.summary("Create a filter")),
+        )
+        .api_route(
             "/tarang/v1/filter/{id}",
-            patch(patch_filter).delete(delete_filter),
+            patch_with(patch_filter, |op| op.summary("Update a filter"))
+                .delete_with(delete_filter, |op| op.summary("Delete a filter")),
         )
-        .route("/tarang/v1/starred", get(get_starred_articles))
-        .route("/tarang/v1/export/opml", get(get_opml))
-        .route("/tarang/v1/export/opml", post(upload_opml))
-        .route(
+        .api_route(
+            "/tarang/v1/starred",
+            get_with(get_starred_articles, |op| {
+                op.summary("List starred articles with feed info")
+            }),
+        )
+        .api_route(
+            "/tarang/v1/export/opml",
+            get_with(get_opml, |op| {
+                op.summary("Export feeds as OPML").description(
+                    "Returns OPML/XML content; documented as text/plain due to axum's \
+                     IntoResponse impl for String",
+                )
+            }),
+        )
+        .api_route(
+            "/tarang/v1/export/opml",
+            post_with(upload_opml, |op| {
+                op.summary("Import feeds from an OPML file").description(
+                    "Accepts multipart/form-data with a single file field; documented as \
+                     generic multipart, not field-specific",
+                )
+            }),
+        )
+        .api_route(
             "/tarang/v1/export/starred",
-            get(get_export_starred_articles),
+            get_with(get_export_starred_articles, |op| {
+                op.summary("Export starred articles' url and content")
+            }),
         )
+        .route("/api.json", get(serve_api))
+        .route("/docs", Swagger::new("/api.json").axum_route())
+        .finish_api(&mut api);
+
+    let app = documented
         .nest("/greader", greader::router())
+        .layer(Extension(Arc::new(api)))
         .with_state(AppState { db, http })
         .layer(CorsLayer::permissive());
 
@@ -112,4 +178,8 @@ async fn main() {
 
     println!("listening on http://{bind_addr}");
     axum::serve(listener, app).await.expect("server crashed");
+}
+
+async fn serve_api(Extension(api): Extension<Arc<OpenApi>>) -> Json<OpenApi> {
+    Json((*api).clone())
 }
