@@ -4,14 +4,22 @@ use axum::{
 };
 use axum_jsonschema::Json;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::AppError;
 use crate::{
     AppState,
-    database::{self, DbError, Filter},
+    database::{self, Article, DbError, Filter},
     filter::{self, MatchType},
 };
+
+#[derive(Serialize, JsonSchema)]
+pub struct FilterWithMatches {
+    #[serde(flatten)]
+    #[schemars(flatten)]
+    pub filter: Filter,
+    pub matched_articles: Vec<Article>,
+}
 
 #[derive(Deserialize, JsonSchema)]
 pub struct PostFilterReq {
@@ -25,7 +33,7 @@ pub struct PostFilterReq {
 pub async fn post_filter(
     State(AppState { db, .. }): State<AppState>,
     Json(payload): Json<PostFilterReq>,
-) -> Result<Json<Filter>, AppError> {
+) -> Result<Json<FilterWithMatches>, AppError> {
     let match_type = parse_match_type(&payload.match_type);
     // Validated here so create_filter's compile_filter().expect() cannot
     // observe an invalid pattern.
@@ -40,8 +48,12 @@ pub async fn post_filter(
         &payload.pattern,
     )
     .await?;
+    let matched_articles = database::list_articles_matched_by_filter(&db, created.pk).await?;
 
-    Ok(Json(created))
+    Ok(Json(FilterWithMatches {
+        filter: created,
+        matched_articles,
+    }))
 }
 
 pub async fn get_filter(
@@ -63,7 +75,7 @@ pub async fn patch_filter(
     State(AppState { db, .. }): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<PatchFilterReq>,
-) -> Result<Json<Filter>, AppError> {
+) -> Result<Json<FilterWithMatches>, AppError> {
     if let Some(pattern) = payload.pattern.as_deref() {
         // A client tweaking the pattern shouldn't have to resend
         // match_type - fall back to the row's existing value.
@@ -89,8 +101,12 @@ pub async fn patch_filter(
         payload.enabled,
     )
     .await?;
+    let matched_articles = database::list_articles_matched_by_filter(&db, updated.pk).await?;
 
-    Ok(Json(updated))
+    Ok(Json(FilterWithMatches {
+        filter: updated,
+        matched_articles,
+    }))
 }
 
 pub async fn delete_filter(

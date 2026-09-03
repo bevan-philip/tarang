@@ -149,6 +149,23 @@ pub async fn clear_matches_for_articles(db: &Db, article_pks: &[i64]) -> DbResul
     Ok(())
 }
 
+pub async fn list_articles_matched_by_filter(db: &Db, filter_pk: i64) -> DbResult<Vec<Article>> {
+    let articles = sqlx::query_as!(
+        Article,
+        r#"SELECT article.pk, article.feed, article.url, article.guid, article.title,
+                  article.content, article.summary, article.published_at, article.retrieved_at
+           FROM article
+           JOIN article_filter_match afm ON afm.article = article.pk
+           WHERE afm.filter = ?
+           ORDER BY article.published_at DESC"#,
+        filter_pk,
+    )
+    .fetch_all(&db.read)
+    .await?;
+
+    Ok(articles)
+}
+
 pub async fn record_filter_matches(
     db: &Db,
     articles: &[Article],
