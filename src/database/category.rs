@@ -1,4 +1,4 @@
-use super::{Db, DbResult};
+use super::{Db, DbResult, FeedScope};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -21,8 +21,11 @@ pub async fn create_category(db: &Db, name: &str) -> DbResult<Category> {
     Ok(category)
 }
 
-pub async fn list_categories(db: &Db) -> DbResult<Vec<Category>> {
-    let categories = sqlx::query_as!(Category, r#"SELECT pk, name FROM category ORDER BY name"#)
+pub async fn list_categories(db: &Db, scope: FeedScope) -> DbResult<Vec<Category>> {
+    let visible_only = scope.visible_only();
+    let categories = sqlx::query_as!(Category, r#"SELECT pk, name FROM category
+        WHERE NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.category = category.pk AND feed.greader_hidden = 0)
+        ORDER BY name"#, visible_only)
         .fetch_all(&db.read)
         .await?;
 

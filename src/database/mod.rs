@@ -43,6 +43,18 @@ impl From<sqlx::Error> for DbError {
 
 pub type DbResult<T> = Result<T, DbError>;
 
+#[derive(Debug, Clone, Copy)]
+pub enum FeedScope {
+    All,
+    GReaderVisible,
+}
+
+impl FeedScope {
+    fn visible_only(self) -> bool {
+        matches!(self, Self::GReaderVisible)
+    }
+}
+
 #[derive(Clone)]
 pub struct Db {
     pub read: SqlitePool,

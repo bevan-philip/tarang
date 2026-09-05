@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name FROM category ORDER BY name",
+  "query": "SELECT pk, name FROM category\n        WHERE NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.category = category.pk AND feed.greader_hidden = 0)\n        ORDER BY name",
   "describe": {
     "columns": [
       {
@@ -27,12 +27,12 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
       false
     ]
   },
-  "hash": "a6d36f0eedf0c7c38df18f958d93aa236a7e4eb22501df593dfcad32ca9aa6c7"
+  "hash": "79708e22904a883d8c7d523d9d0c50cff7ffc91fc3dbca4c9ae91bda5014f7bf"
 }

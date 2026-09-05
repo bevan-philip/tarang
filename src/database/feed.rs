@@ -1,4 +1,4 @@
-use super::{Db, DbResult};
+use super::{Db, DbResult, FeedScope};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -14,6 +14,7 @@ pub struct Feed {
     pub refresh_interval: i64,
     pub last_refresh: Option<i64>,
     pub next_poll_at: Option<i64>,
+    pub greader_hidden: bool,
 }
 
 pub async fn create_feed(
@@ -23,20 +24,22 @@ pub async fn create_feed(
     category: Option<i64>,
     metadata: Option<&str>,
     refresh_interval: Option<i64>,
+    greader_hidden: bool,
 ) -> DbResult<Feed> {
     let metadata = metadata.unwrap_or("{}");
     let refresh_interval = refresh_interval.unwrap_or(3600);
 
     let feed = sqlx::query_as!(
         Feed,
-        r#"INSERT INTO feed (name, url, category, metadata, refresh_interval)
-           VALUES (?, ?, ?, ?, ?)
-           RETURNING pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at"#,
+        r#"INSERT INTO feed (name, url, category, metadata, refresh_interval, greader_hidden)
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool""#,
         name,
         url,
         category,
         metadata,
         refresh_interval,
+        greader_hidden,
     )
     .fetch_one(&db.write)
     .await?;
@@ -47,7 +50,7 @@ pub async fn create_feed(
 pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
            FROM feed WHERE pk = ?"#,
         pk,
     )
@@ -60,7 +63,7 @@ pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
 pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
            FROM feed WHERE url = ?"#,
         url,
     )
@@ -70,11 +73,13 @@ pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     Ok(feed)
 }
 
-pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
+pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
+    let visible_only = scope.visible_only();
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
-           FROM feed ORDER BY name"#,
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
+           FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name"#,
+        visible_only,
     )
     .fetch_all(&db.read)
     .await?;
@@ -85,7 +90,7 @@ pub async fn list_feeds(db: &Db) -> DbResult<Vec<Feed>> {
 pub async fn list_feeds_due_for_refresh(db: &Db) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at
+        r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
            FROM feed
            WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()"#,
     )
@@ -120,6 +125,7 @@ pub async fn update_feed(
     metadata: Option<&str>,
     refresh_interval: Option<i64>,
     category: Option<Option<i64>>,
+    greader_hidden: Option<bool>,
 ) -> DbResult<Feed> {
     let category_provided = category.is_some();
     let category = category.flatten();
@@ -130,14 +136,16 @@ pub async fn update_feed(
            SET name = COALESCE(?, name),
                metadata = COALESCE(?, metadata),
                refresh_interval = COALESCE(?, refresh_interval),
-               category = CASE WHEN ? THEN ? ELSE category END
+               category = CASE WHEN ? THEN ? ELSE category END,
+               greader_hidden = COALESCE(?, greader_hidden)
            WHERE pk = ?
-           RETURNING pk, name, url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at"#,
+           RETURNING pk, name, url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool""#,
         name,
         metadata,
         refresh_interval,
         category_provided,
         category,
+        greader_hidden,
         pk,
     )
     .fetch_one(&db.write)

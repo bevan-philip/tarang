@@ -1,4 +1,4 @@
-use super::{Db, DbResult, clear_matches_for_articles, record_filter_matches};
+use super::{Db, DbResult, FeedScope, clear_matches_for_articles, record_filter_matches};
 use crate::filter::CompiledFilter;
 use chrono::Utc;
 use schemars::JsonSchema;
@@ -99,7 +99,10 @@ pub struct ArticlePreview {
     pub is_starred: bool,
 }
 
-pub async fn list_article_previews_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<ArticlePreview>> {
+pub async fn list_article_previews_for_feed(
+    db: &Db,
+    feed_pk: i64,
+) -> DbResult<Vec<ArticlePreview>> {
     let articles = sqlx::query_as!(
         ArticlePreview,
         r#"SELECT article.pk, article.feed, article.url, article.title, article.summary,
@@ -206,7 +209,11 @@ const FILTER_EXCLUSION: &str = r#" AND NOT EXISTS (
         WHERE afm.article = article.pk
     )"#;
 
-pub async fn list_articles_by_query(db: &Db, q: &ArticleQuery) -> DbResult<Vec<ArticleWithState>> {
+pub async fn list_articles_by_query(
+    db: &Db,
+    q: &ArticleQuery,
+    scope: FeedScope,
+) -> DbResult<Vec<ArticleWithState>> {
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT ");
     qb.push(ARTICLE_WITH_STATE_COLUMNS);
     qb.push(" FROM article LEFT JOIN article_state ON article_state.article = article.pk");
@@ -216,6 +223,9 @@ pub async fn list_articles_by_query(db: &Db, q: &ArticleQuery) -> DbResult<Vec<A
     }
 
     qb.push(" WHERE 1 = 1");
+    if scope.visible_only() {
+        qb.push(" AND EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0)");
+    }
 
     if let Some(feed) = q.feed {
         qb.push(" AND article.feed = ").push_bind(feed);
@@ -276,7 +286,11 @@ const FILTER_EXCLUSION_UNLESS_STARRED: &str = r#" AND (
         )
     )"#;
 
-pub async fn list_articles_by_pks(db: &Db, pks: &[i64]) -> DbResult<Vec<ArticleWithState>> {
+pub async fn list_articles_by_pks(
+    db: &Db,
+    pks: &[i64],
+    scope: FeedScope,
+) -> DbResult<Vec<ArticleWithState>> {
     if pks.is_empty() {
         return Ok(Vec::new());
     }
@@ -292,6 +306,10 @@ pub async fn list_articles_by_pks(db: &Db, pks: &[i64]) -> DbResult<Vec<ArticleW
         separated.push_bind(pk);
     }
     qb.push(")");
+
+    if scope.visible_only() {
+        qb.push(" AND EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0)");
+    }
 
     qb.push(FILTER_EXCLUSION_UNLESS_STARRED);
 

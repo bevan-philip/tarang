@@ -13,7 +13,7 @@ use crate::{
         ArticlePreview, DbError, Feed, StarredArticlesWithFeed, drop_feed,
         list_article_previews_for_feed, list_feed, list_starred_articles_with_feed, update_feed,
     },
-    feed::create_feed_with_articles,
+    feed::{FeedOptions, create_feed_with_articles},
 };
 
 #[derive(Serialize, JsonSchema)]
@@ -42,12 +42,14 @@ pub struct PostFeedReq {
     pub category_id: Option<i64>,
     pub metadata: Option<String>,
     pub refresh_interval: Option<i64>,
+    pub greader_hidden: Option<bool>,
 }
 
 #[derive(Serialize, JsonSchema)]
 pub struct PostFeedResp {
     pub name: String,
     pub id: i64,
+    pub greader_hidden: bool,
 }
 
 pub async fn post_feed(
@@ -57,17 +59,21 @@ pub async fn post_feed(
     let feed = create_feed_with_articles(
         &db,
         &http,
-        Some(&payload.name),
         &payload.url,
-        payload.category_id,
-        payload.metadata.as_deref(),
-        payload.refresh_interval,
+        FeedOptions {
+            name: Some(&payload.name),
+            category: payload.category_id,
+            metadata: payload.metadata.as_deref(),
+            refresh_interval: payload.refresh_interval,
+            greader_hidden: payload.greader_hidden.unwrap_or(false),
+        },
     )
     .await?;
 
     Ok(Json(PostFeedResp {
         name: feed.name,
         id: feed.pk,
+        greader_hidden: feed.greader_hidden,
     }))
 }
 
@@ -84,6 +90,7 @@ pub struct PatchFeedReq {
     name: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
+    greader_hidden: Option<bool>,
     #[serde(default, with = "::serde_with::rust::double_option")]
     #[schemars(with = "Option<i64>")]
     category_id: Option<Option<i64>>,
@@ -101,6 +108,7 @@ pub async fn patch_feed(
         payload.metadata.as_deref(),
         payload.refresh_interval,
         payload.category_id,
+        payload.greader_hidden,
     )
     .await?;
 

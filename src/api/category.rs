@@ -4,20 +4,26 @@ use axum::{
 };
 use axum_jsonschema::Json;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use super::{AppError, feed::PostFeedResp};
+use super::AppError;
 use crate::{
     AppState,
     database::{Category, create_category, drop_category, list_categories, rename_category},
 };
 
+#[derive(Serialize, JsonSchema)]
+pub struct PostCategoryResp {
+    pub name: String,
+    pub id: i64,
+}
+
 pub async fn post_category(
     State(AppState { db, .. }): State<AppState>,
     Path(name): Path<String>,
-) -> Result<Json<PostFeedResp>, AppError> {
+) -> Result<Json<PostCategoryResp>, AppError> {
     let category = create_category(&db, &name).await?;
-    Ok(Json(PostFeedResp {
+    Ok(Json(PostCategoryResp {
         name,
         id: category.pk,
     }))
@@ -26,7 +32,9 @@ pub async fn post_category(
 pub async fn get_category(
     State(AppState { db, .. }): State<AppState>,
 ) -> Result<Json<Vec<Category>>, AppError> {
-    Ok(Json(list_categories(&db).await?))
+    Ok(Json(
+        list_categories(&db, crate::database::FeedScope::All).await?,
+    ))
 }
 
 pub async fn delete_category(

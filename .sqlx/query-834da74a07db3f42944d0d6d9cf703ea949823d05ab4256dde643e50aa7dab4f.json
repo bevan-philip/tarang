@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO feed (name, url, category, metadata, refresh_interval)\n           VALUES (?, ?, ?, ?, ?)\n           RETURNING pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at",
+  "query": "SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\"\n           FROM feed\n           WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()",
   "describe": {
     "columns": [
       {
@@ -90,21 +90,33 @@
             "name": "next_poll_at"
           }
         }
+      },
+      {
+        "name": "greader_hidden: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "greader_hidden"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 5
+      "Right": 0
     },
     "nullable": [
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "a7208138939105848d9cef7b9c66008b8dc290607adc27abe83c4b8f8772d764"
+  "hash": "834da74a07db3f42944d0d6d9cf703ea949823d05ab4256dde643e50aa7dab4f"
 }

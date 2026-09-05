@@ -32,22 +32,38 @@ pub async fn update_feed_articles(
     Ok(db_entries)
 }
 
+#[derive(Default)]
+pub struct FeedOptions<'a> {
+    pub name: Option<&'a str>,
+    pub category: Option<i64>,
+    pub metadata: Option<&'a str>,
+    pub refresh_interval: Option<i64>,
+    pub greader_hidden: bool,
+}
+
 pub async fn create_feed_with_articles(
     db: &Db,
     http: &reqwest::Client,
-    name: Option<&str>,
     url: &str,
-    category: Option<i64>,
-    metadata: Option<&str>,
-    refresh_interval: Option<i64>,
+    options: FeedOptions<'_>,
 ) -> FeedResult<database::Feed> {
     let (parsed_title, articles) = get_feed_articles(http, url).await?;
-    let name = name
+    let name = options
+        .name
         .map(str::to_owned)
         .or(parsed_title)
         .unwrap_or_else(|| url.to_string());
 
-    let feed = database::create_feed(db, &name, url, category, metadata, refresh_interval).await?;
+    let feed = database::create_feed(
+        db,
+        &name,
+        url,
+        options.category,
+        options.metadata,
+        options.refresh_interval,
+        options.greader_hidden,
+    )
+    .await?;
     let filters = filter::load_compiled_filters(db).await?;
     database::create_articles(db, feed.pk, &articles, &filters).await?;
 

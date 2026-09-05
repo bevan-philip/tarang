@@ -24,7 +24,7 @@ pub async fn upload_opml(
         let opml = str::from_utf8(&opml_bytes)?;
 
         let feeds = opml::parse_opml(opml).await?;
-        let categories = list_categories(&db).await?;
+        let categories = list_categories(&db, crate::database::FeedScope::All).await?;
 
         let mut category_map: HashMap<String, i64> =
             categories.into_iter().map(|c| (c.name, c.pk)).collect();
@@ -37,6 +37,7 @@ pub async fn upload_opml(
                     category_id: None,
                     metadata: None,
                     refresh_interval: None,
+                    greader_hidden: None,
                 };
                 let _ = post_feed(
                     State(AppState {
@@ -61,6 +62,7 @@ pub async fn upload_opml(
                 category_id: Some(category_map[&feed.category.unwrap()]),
                 metadata: None,
                 refresh_interval: None,
+                greader_hidden: None,
             };
             let _ = post_feed(
                 State(AppState {
@@ -77,8 +79,8 @@ pub async fn upload_opml(
 }
 
 pub async fn get_opml(State(AppState { db, .. }): State<AppState>) -> Result<String, AppError> {
-    let feeds = list_feeds(&db).await?;
-    let categories = list_categories(&db).await?;
+    let feeds = list_feeds(&db, crate::database::FeedScope::All).await?;
+    let categories = list_categories(&db, crate::database::FeedScope::All).await?;
 
     Ok(export_opml(feeds, categories).await?)
 }

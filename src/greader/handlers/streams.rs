@@ -97,8 +97,8 @@ fn percent_decode_segment(raw: &str) -> String {
 async fn build_lookup_maps(
     db: &Db,
 ) -> Result<(HashMap<i64, Feed>, HashMap<i64, String>), GReaderError> {
-    let feeds = list_feeds(db).await?;
-    let categories = list_categories(db).await?;
+    let feeds = list_feeds(db, crate::database::FeedScope::GReaderVisible).await?;
+    let categories = list_categories(db, crate::database::FeedScope::GReaderVisible).await?;
     let category_name_by_pk: HashMap<i64, String> =
         categories.into_iter().map(|c| (c.pk, c.name)).collect();
 
@@ -185,7 +185,8 @@ pub async fn stream_items_ids(
     let sp = parse_stream_params(&params);
     let query = stream_to_query(&db, &stream, &sp).await?;
 
-    let articles = list_articles_by_query(&db, &query).await?;
+    let articles =
+        list_articles_by_query(&db, &query, crate::database::FeedScope::GReaderVisible).await?;
 
     let continuation = if articles.len() as i64 == sp.n {
         articles.last().map(|a| a.pk.to_string())
@@ -217,7 +218,8 @@ pub async fn stream_items_contents(
         .collect();
     let pks = pks?;
 
-    let articles = list_articles_by_pks(&db, &pks).await?;
+    let articles =
+        list_articles_by_pks(&db, &pks, crate::database::FeedScope::GReaderVisible).await?;
     let (feeds_by_pk, category_names_by_feed) = build_lookup_maps(&db).await?;
 
     let response = build_contents_response(
@@ -241,7 +243,8 @@ pub async fn stream_contents(
     let sp = parse_stream_params(&params);
     let query = stream_to_query(&db, &stream, &sp).await?;
 
-    let articles = list_articles_by_query(&db, &query).await?;
+    let articles =
+        list_articles_by_query(&db, &query, crate::database::FeedScope::GReaderVisible).await?;
     let (feeds_by_pk, category_names_by_feed) = build_lookup_maps(&db).await?;
 
     let continuation = if articles.len() as i64 == sp.n {
@@ -266,24 +269,26 @@ pub async fn unread_count(
 ) -> Result<Json<UnreadCountResponse>, GReaderError> {
     let mut counts = Vec::new();
 
-    let total = count_unread_total(&db).await?;
+    let total = count_unread_total(&db, crate::database::FeedScope::GReaderVisible).await?;
     counts.push(UnreadCountEntry {
         id: StreamId::ReadingList.to_string(),
         count: total,
     });
 
-    for fc in list_unread_counts_by_feed(&db).await? {
+    for fc in list_unread_counts_by_feed(&db, crate::database::FeedScope::GReaderVisible).await? {
         counts.push(UnreadCountEntry {
             id: StreamId::Feed(FeedRef::Pk(fc.feed)).to_string(),
             count: fc.count,
         });
     }
 
-    let categories = list_categories(&db).await?;
+    let categories = list_categories(&db, crate::database::FeedScope::GReaderVisible).await?;
     let category_name_by_pk: HashMap<i64, String> =
         categories.into_iter().map(|c| (c.pk, c.name)).collect();
 
-    for cc in list_unread_counts_by_category(&db).await? {
+    for cc in
+        list_unread_counts_by_category(&db, crate::database::FeedScope::GReaderVisible).await?
+    {
         if let Some(name) = category_name_by_pk.get(&cc.category) {
             counts.push(UnreadCountEntry {
                 id: StreamId::Label(name.clone()).to_string(),

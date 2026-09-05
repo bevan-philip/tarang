@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval),\n               category = CASE WHEN ? THEN ? ELSE category END\n           WHERE pk = ?\n           RETURNING pk, name, url, category as \"category: Option<i64>\", metadata, refresh_interval, last_refresh, next_poll_at",
+  "query": "SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\"\n           FROM feed WHERE pk = ?",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
         }
       },
       {
-        "name": "category: Option<i64>",
+        "name": "category",
         "ordinal": 3,
         "type_info": "Integer",
         "origin": {
@@ -90,21 +90,33 @@
             "name": "next_poll_at"
           }
         }
+      },
+      {
+        "name": "greader_hidden: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "greader_hidden"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 1
     },
     "nullable": [
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "9bdb2572e74ef19394ea7983c093ff6be3b8d7d44cdeb85d9cbc135200c7ca0a"
+  "hash": "38ef48023bcaf47b67c6c6eb398a70db47b4c2ac2379f2ce74ded993bb7a0f3a"
 }

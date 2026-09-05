@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT feed.category as \"category!: i64\", COUNT(*) as \"count!: i64\"\n           FROM article\n           JOIN feed ON feed.pk = article.feed\n           LEFT JOIN article_state ON article_state.article = article.pk\n           WHERE feed.category IS NOT NULL\n             AND (article_state.article IS NULL OR article_state.is_read = 0)\n             AND (NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0))\n             AND NOT EXISTS (\n                 SELECT 1 FROM article_filter_match afm\n                 JOIN filter f ON f.pk = afm.filter AND f.enabled = 1\n                 WHERE afm.article = article.pk\n             )\n           GROUP BY feed.category",
+  "describe": {
+    "columns": [
+      {
+        "name": "category!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "name": "count!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "8dcf5ab2678551d99ad65e9d47a01fed353d9f525adcce9fad9d5719c92b7c06"
+}

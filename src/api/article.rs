@@ -15,7 +15,7 @@ pub async fn get_article(
     State(AppState { db, .. }): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ArticleWithState>, AppError> {
-    let article = list_articles_by_pks(&db, &[id])
+    let article = list_articles_by_pks(&db, &[id], crate::database::FeedScope::All)
         .await?
         .into_iter()
         .next()

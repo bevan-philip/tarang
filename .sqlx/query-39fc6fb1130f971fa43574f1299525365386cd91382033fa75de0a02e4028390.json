@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at\n           FROM feed ORDER BY name",
+  "query": "SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\"\n           FROM feed WHERE url = ?",
   "describe": {
     "columns": [
       {
@@ -90,10 +90,21 @@
             "name": "next_poll_at"
           }
         }
+      },
+      {
+        "name": "greader_hidden: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "greader_hidden"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
@@ -103,8 +114,9 @@
       false,
       false,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "0728d62ce3e68f1808d6346d752e0274c3822e26d3496212a24356b8638a8b43"
+  "hash": "39fc6fb1130f971fa43574f1299525365386cd91382033fa75de0a02e4028390"
 }

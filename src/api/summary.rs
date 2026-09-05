@@ -28,9 +28,9 @@ pub struct FeedOutline {
 pub async fn get_summary(
     State(AppState { db, .. }): State<AppState>,
 ) -> Result<Json<Summary>, AppError> {
-    let feeds = database::list_feeds(&db).await?;
+    let feeds = database::list_feeds(&db, crate::database::FeedScope::All).await?;
 
-    let categories = database::list_categories(&db).await?;
+    let categories = database::list_categories(&db, crate::database::FeedScope::All).await?;
 
     let mut articles_by_feed: HashMap<i64, Vec<ArticlePreview>> = HashMap::new();
     for article in list_article_previews_for_feeds(&db, 10).await? {

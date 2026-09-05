@@ -194,6 +194,7 @@ mod tests {
             refresh_interval: 0,
             last_refresh: None,
             next_poll_at: None,
+            greader_hidden: false,
         }
     }
 

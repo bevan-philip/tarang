@@ -8,7 +8,7 @@ use crate::database::{
     Category, DbError, create_category, drop_category, drop_feed, get_category_by_name,
     list_categories, list_feed, list_feeds, rename_category, update_feed,
 };
-use crate::feed::{FeedError, create_feed_with_articles};
+use crate::feed::{FeedError, FeedOptions, create_feed_with_articles};
 use crate::greader::GReaderError;
 use crate::greader::form::MergedParams;
 use crate::greader::ids::{FeedRef, StreamId};
@@ -26,7 +26,7 @@ pub async fn tag_list(
         kind: None,
     }];
 
-    for category in list_categories(&db).await? {
+    for category in list_categories(&db, crate::database::FeedScope::GReaderVisible).await? {
         tags.push(Tag {
             id: StreamId::Label(category.name.clone()).to_string(),
             label: Some(category.name),
@@ -40,8 +40,8 @@ pub async fn tag_list(
 pub async fn subscription_list(
     State(AppState { db, .. }): State<AppState>,
 ) -> Result<Json<SubscriptionListResponse>, GReaderError> {
-    let feeds = list_feeds(&db).await?;
-    let categories = list_categories(&db).await?;
+    let feeds = list_feeds(&db, crate::database::FeedScope::GReaderVisible).await?;
+    let categories = list_categories(&db, crate::database::FeedScope::GReaderVisible).await?;
     let category_by_pk: HashMap<i64, Category> =
         categories.into_iter().map(|c| (c.pk, c)).collect();
 
@@ -84,7 +84,7 @@ pub async fn subscription_quickadd(
     // Real clients quickadd defensively and expect a normal response on
     // "already subscribed," not a 409 — so fall back to a lookup instead
     // of surfacing the conflict.
-    let feed = match create_feed_with_articles(&db, &http, None, url, None, None, None).await {
+    let feed = match create_feed_with_articles(&db, &http, url, FeedOptions::default()).await {
         Ok(feed) => feed,
         Err(FeedError::Db(DbError::AlreadyExists(_))) => crate::database::get_feed_by_url(&db, url)
             .await?
@@ -149,7 +149,18 @@ pub async fn subscription_edit(
             let title = params.get("t");
             let category_pk = resolve_category_from_add(&db, &params).await?;
 
-            match create_feed_with_articles(&db, &http, title, url, category_pk, None, None).await {
+            match create_feed_with_articles(
+                &db,
+                &http,
+                url,
+                FeedOptions {
+                    name: title,
+                    category: category_pk,
+                    ..Default::default()
+                },
+            )
+            .await
+            {
                 Ok(_) => {}
                 Err(FeedError::Db(DbError::AlreadyExists(_))) => {}
                 Err(e) => return Err(e.into()),
@@ -194,7 +205,7 @@ pub async fn subscription_edit(
             };
 
             if title.is_some() || new_category.is_some() {
-                update_feed(&db, pk, title, None, None, new_category).await?;
+                update_feed(&db, pk, title, None, None, new_category, None).await?;
             }
         }
         other => return Err(GReaderError::BadRequest(format!("unknown ac: {other}"))),

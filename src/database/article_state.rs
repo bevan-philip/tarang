@@ -1,4 +1,4 @@
-use super::{Db, DbError, DbResult};
+use super::{Db, DbError, DbResult, FeedScope};
 use schemars::JsonSchema;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
@@ -144,16 +144,18 @@ pub async fn mark_all_read_for_category(db: &Db, category_pk: i64, before_ts: i6
     Ok(())
 }
 
-pub async fn count_unread_total(db: &Db) -> DbResult<i64> {
+pub async fn count_unread_total(db: &Db, scope: FeedScope) -> DbResult<i64> {
     let rec = sqlx::query!(
         r#"SELECT COUNT(*) as "count!: i64" FROM article
            LEFT JOIN article_state ON article_state.article = article.pk
            WHERE (article_state.article IS NULL OR article_state.is_read = 0)
+             AND (NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0))
              AND NOT EXISTS (
                  SELECT 1 FROM article_filter_match afm
                  JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
                  WHERE afm.article = article.pk
-             )"#
+             )"#,
+        scope.visible_only(),
     )
     .fetch_one(&db.read)
     .await?;
@@ -161,19 +163,24 @@ pub async fn count_unread_total(db: &Db) -> DbResult<i64> {
     Ok(rec.count)
 }
 
-pub async fn list_unread_counts_by_feed(db: &Db) -> DbResult<Vec<FeedUnreadCount>> {
+pub async fn list_unread_counts_by_feed(
+    db: &Db,
+    scope: FeedScope,
+) -> DbResult<Vec<FeedUnreadCount>> {
     let rows = sqlx::query_as!(
         FeedUnreadCount,
         r#"SELECT article.feed as "feed!: i64", COUNT(*) as "count!: i64"
            FROM article
            LEFT JOIN article_state ON article_state.article = article.pk
            WHERE (article_state.article IS NULL OR article_state.is_read = 0)
+             AND (NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0))
              AND NOT EXISTS (
                  SELECT 1 FROM article_filter_match afm
                  JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
                  WHERE afm.article = article.pk
              )
-           GROUP BY article.feed"#
+           GROUP BY article.feed"#,
+        scope.visible_only(),
     )
     .fetch_all(&db.read)
     .await?;
@@ -181,7 +188,10 @@ pub async fn list_unread_counts_by_feed(db: &Db) -> DbResult<Vec<FeedUnreadCount
     Ok(rows)
 }
 
-pub async fn list_unread_counts_by_category(db: &Db) -> DbResult<Vec<CategoryUnreadCount>> {
+pub async fn list_unread_counts_by_category(
+    db: &Db,
+    scope: FeedScope,
+) -> DbResult<Vec<CategoryUnreadCount>> {
     let rows = sqlx::query_as!(
         CategoryUnreadCount,
         r#"SELECT feed.category as "category!: i64", COUNT(*) as "count!: i64"
@@ -190,12 +200,14 @@ pub async fn list_unread_counts_by_category(db: &Db) -> DbResult<Vec<CategoryUnr
            LEFT JOIN article_state ON article_state.article = article.pk
            WHERE feed.category IS NOT NULL
              AND (article_state.article IS NULL OR article_state.is_read = 0)
+             AND (NOT ? OR EXISTS (SELECT 1 FROM feed WHERE feed.pk = article.feed AND feed.greader_hidden = 0))
              AND NOT EXISTS (
                  SELECT 1 FROM article_filter_match afm
                  JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
                  WHERE afm.article = article.pk
              )
-           GROUP BY feed.category"#
+           GROUP BY feed.category"#,
+        scope.visible_only(),
     )
     .fetch_all(&db.read)
     .await?;
