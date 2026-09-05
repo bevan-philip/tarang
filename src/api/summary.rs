@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use super::AppError;
 use crate::{
     AppState,
-    database::{self, Article, Category, Feed, list_articles_for_feeds},
+    database::{self, ArticlePreview, Category, Feed, list_article_previews_for_feeds},
 };
 
 #[derive(Serialize, JsonSchema)]
@@ -22,7 +22,7 @@ pub struct FeedOutline {
     #[schemars(flatten)]
     feed: Feed,
     category: Option<Category>,
-    articles: Vec<Article>,
+    articles: Vec<ArticlePreview>,
 }
 
 pub async fn get_summary(
@@ -32,8 +32,8 @@ pub async fn get_summary(
 
     let categories = database::list_categories(&db).await?;
 
-    let mut articles_by_feed: HashMap<i64, Vec<Article>> = HashMap::new();
-    for article in list_articles_for_feeds(&db, 10).await? {
+    let mut articles_by_feed: HashMap<i64, Vec<ArticlePreview>> = HashMap::new();
+    for article in list_article_previews_for_feeds(&db, 10).await? {
         articles_by_feed
             .entry(article.feed)
             .or_default()

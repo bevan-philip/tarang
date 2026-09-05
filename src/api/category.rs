@@ -3,11 +3,13 @@ use axum::{
     http::StatusCode,
 };
 use axum_jsonschema::Json;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 use super::{AppError, feed::PostFeedResp};
 use crate::{
     AppState,
-    database::{Category, create_category, drop_category, list_categories},
+    database::{Category, create_category, drop_category, list_categories, rename_category},
 };
 
 pub async fn post_category(
@@ -34,4 +36,18 @@ pub async fn delete_category(
     drop_category(&db, id).await?;
 
     Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PatchCategoryReq {
+    pub name: String,
+}
+
+pub async fn patch_category(
+    State(AppState { db, .. }): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<PatchCategoryReq>,
+) -> Result<Json<Category>, AppError> {
+    let category = rename_category(&db, id, &payload.name).await?;
+    Ok(Json(category))
 }

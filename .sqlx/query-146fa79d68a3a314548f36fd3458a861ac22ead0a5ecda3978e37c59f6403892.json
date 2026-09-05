@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at\n           FROM (\n               SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at,\n                      ROW_NUMBER() OVER (PARTITION BY feed ORDER BY published_at DESC) AS rn\n               FROM article\n           )\n           WHERE rn <= ?\n           ORDER BY feed, published_at DESC",
+  "query": "SELECT article.pk, article.feed, article.url, article.title, article.summary,\n                  article.published_at, article.retrieved_at,\n                  COALESCE(article_state.is_read, 0) as \"is_read!: bool\",\n                  COALESCE(article_state.is_starred, 0) as \"is_starred!: bool\"\n           FROM article\n           LEFT JOIN article_state ON article_state.article = article.pk\n           WHERE article.feed = ?\n             AND NOT EXISTS (\n                 SELECT 1 FROM article_filter_match afm\n                 JOIN filter f ON f.pk = afm.filter AND f.enabled = 1\n                 WHERE afm.article = article.pk\n             )\n           ORDER BY article.published_at DESC",
   "describe": {
     "columns": [
       {
@@ -37,19 +37,8 @@
         }
       },
       {
-        "name": "guid",
-        "ordinal": 3,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "article",
-            "name": "guid"
-          }
-        }
-      },
-      {
         "name": "title",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -59,19 +48,8 @@
         }
       },
       {
-        "name": "content",
-        "ordinal": 5,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "article",
-            "name": "content"
-          }
-        }
-      },
-      {
         "name": "summary",
-        "ordinal": 6,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +60,7 @@
       },
       {
         "name": "published_at",
-        "ordinal": 7,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +71,7 @@
       },
       {
         "name": "retrieved_at",
-        "ordinal": 8,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -101,6 +79,18 @@
             "name": "retrieved_at"
           }
         }
+      },
+      {
+        "name": "is_read!: bool",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "is_starred!: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -110,13 +100,13 @@
       false,
       false,
       false,
-      false,
+      true,
+      true,
       true,
       false,
-      true,
-      true,
+      false,
       false
     ]
   },
-  "hash": "aef923dc12cd81ae83e292fd8f78defd48f99a0e3d8befa2832df6636e119ca1"
+  "hash": "146fa79d68a3a314548f36fd3458a861ac22ead0a5ecda3978e37c59f6403892"
 }

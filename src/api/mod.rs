@@ -8,6 +8,7 @@ use std::str::Utf8Error;
 
 use crate::{database::DbError, feed::FeedError, opml::OpmlError};
 
+mod article;
 mod category;
 mod export;
 mod feed;
@@ -15,6 +16,7 @@ mod filter;
 mod health;
 mod summary;
 
+pub use article::*;
 pub use category::*;
 pub use export::*;
 pub use feed::*;

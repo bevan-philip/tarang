@@ -1,0 +1,112 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pk, feed, url, title, summary, published_at, retrieved_at,\n                  is_read as \"is_read!: bool\", is_starred as \"is_starred!: bool\"\n           FROM (\n               SELECT\n                   article.pk AS pk,\n                   article.feed AS feed,\n                   article.url AS url,\n                   article.title AS title,\n                   article.summary AS summary,\n                   article.published_at AS published_at,\n                   article.retrieved_at AS retrieved_at,\n                   COALESCE(article_state.is_read, 0) AS is_read,\n                   COALESCE(article_state.is_starred, 0) AS is_starred,\n                   ROW_NUMBER() OVER (\n                       PARTITION BY article.feed ORDER BY article.published_at DESC\n                   ) AS rn\n               FROM article\n               LEFT JOIN article_state ON article_state.article = article.pk\n               WHERE NOT EXISTS (\n                   SELECT 1 FROM article_filter_match afm\n                   JOIN filter f ON f.pk = afm.filter AND f.enabled = 1\n                   WHERE afm.article = article.pk\n               )\n           )\n           WHERE rn <= ?\n           ORDER BY feed, published_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "feed",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "feed"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "summary",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "name": "published_at",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "name": "retrieved_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "retrieved_at"
+          }
+        }
+      },
+      {
+        "name": "is_read!: bool",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "is_starred!: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f68e08416bfddabc76af8b9d7f3b70c586d6f05ed94db293fd2ef915637ac0fe"
+}

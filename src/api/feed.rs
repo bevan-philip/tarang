@@ -10,8 +10,8 @@ use super::AppError;
 use crate::{
     AppState,
     database::{
-        Article, DbError, Feed, StarredArticlesWithFeed, drop_feed, list_articles_for_feed,
-        list_feed, list_starred_articles_with_feed, update_feed,
+        ArticlePreview, DbError, Feed, StarredArticlesWithFeed, drop_feed,
+        list_article_previews_for_feed, list_feed, list_starred_articles_with_feed, update_feed,
     },
     feed::create_feed_with_articles,
 };
@@ -20,7 +20,7 @@ use crate::{
 pub struct GetFeed {
     id: i64,
     feed: Feed,
-    articles: Vec<Article>,
+    articles: Vec<ArticlePreview>,
 }
 
 pub async fn get_feed(
@@ -30,7 +30,7 @@ pub async fn get_feed(
     let feed = list_feed(&db, id)
         .await?
         .ok_or_else(|| DbError::NotFound(format!("feed {id} not found")))?;
-    let articles = list_articles_for_feed(&db, id).await?;
+    let articles = list_article_previews_for_feed(&db, id).await?;
 
     Ok(Json(GetFeed { id, feed, articles }))
 }

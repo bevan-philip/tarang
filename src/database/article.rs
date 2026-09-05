@@ -86,18 +86,35 @@ pub async fn list_all_articles(db: &Db) -> DbResult<Vec<Article>> {
     Ok(articles)
 }
 
-pub async fn list_articles_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<Article>> {
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
+pub struct ArticlePreview {
+    pub pk: i64,
+    pub feed: i64,
+    pub url: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub published_at: Option<i64>,
+    pub retrieved_at: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+pub async fn list_article_previews_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<ArticlePreview>> {
     let articles = sqlx::query_as!(
-        Article,
-        r#"SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at
+        ArticlePreview,
+        r#"SELECT article.pk, article.feed, article.url, article.title, article.summary,
+                  article.published_at, article.retrieved_at,
+                  COALESCE(article_state.is_read, 0) as "is_read!: bool",
+                  COALESCE(article_state.is_starred, 0) as "is_starred!: bool"
            FROM article
-           WHERE feed = ?
+           LEFT JOIN article_state ON article_state.article = article.pk
+           WHERE article.feed = ?
              AND NOT EXISTS (
                  SELECT 1 FROM article_filter_match afm
                  JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
                  WHERE afm.article = article.pk
              )
-           ORDER BY published_at DESC"#,
+           ORDER BY article.published_at DESC"#,
         feed_pk,
     )
     .fetch_all(&db.read)
@@ -106,14 +123,35 @@ pub async fn list_articles_for_feed(db: &Db, feed_pk: i64) -> DbResult<Vec<Artic
     Ok(articles)
 }
 
-pub async fn list_articles_for_feeds(db: &Db, limit_per_feed: i64) -> DbResult<Vec<Article>> {
+pub async fn list_article_previews_for_feeds(
+    db: &Db,
+    limit_per_feed: i64,
+) -> DbResult<Vec<ArticlePreview>> {
     let articles = sqlx::query_as!(
-        Article,
-        r#"SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at
+        ArticlePreview,
+        r#"SELECT pk, feed, url, title, summary, published_at, retrieved_at,
+                  is_read as "is_read!: bool", is_starred as "is_starred!: bool"
            FROM (
-               SELECT pk, feed, url, guid, title, content, summary, published_at, retrieved_at,
-                      ROW_NUMBER() OVER (PARTITION BY feed ORDER BY published_at DESC) AS rn
+               SELECT
+                   article.pk AS pk,
+                   article.feed AS feed,
+                   article.url AS url,
+                   article.title AS title,
+                   article.summary AS summary,
+                   article.published_at AS published_at,
+                   article.retrieved_at AS retrieved_at,
+                   COALESCE(article_state.is_read, 0) AS is_read,
+                   COALESCE(article_state.is_starred, 0) AS is_starred,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY article.feed ORDER BY article.published_at DESC
+                   ) AS rn
                FROM article
+               LEFT JOIN article_state ON article_state.article = article.pk
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM article_filter_match afm
+                   JOIN filter f ON f.pk = afm.filter AND f.enabled = 1
+                   WHERE afm.article = article.pk
+               )
            )
            WHERE rn <= ?
            ORDER BY feed, published_at DESC"#,
@@ -125,7 +163,7 @@ pub async fn list_articles_for_feeds(db: &Db, limit_per_feed: i64) -> DbResult<V
     Ok(articles)
 }
 
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct ArticleWithState {
     pub pk: i64,
     pub feed: i64,

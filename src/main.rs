@@ -1,7 +1,8 @@
 use crate::api::{
-    delete_category, delete_feed, delete_filter, get_category, get_export_starred_articles,
-    get_feed, get_filter, get_opml, get_starred_articles, get_summary, health, patch_feed,
-    patch_filter, post_category, post_feed, post_filter, upload_opml,
+    delete_category, delete_feed, delete_filter, get_article, get_category,
+    get_export_starred_articles, get_feed, get_filter, get_opml, get_starred_articles,
+    get_summary, health, patch_category, patch_feed, patch_filter, post_category, post_feed,
+    post_filter, upload_opml,
 };
 use crate::database::Db;
 use aide::{
@@ -14,7 +15,7 @@ use aide::{
 };
 use axum::{Json, extract::Extension, routing::get};
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
+use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 
 mod api;
 mod backup;
@@ -97,6 +98,12 @@ async fn main() {
             get_with(get_feed, |op| op.summary("Get a feed and its articles")),
         )
         .api_route(
+            "/tarang/v1/article/{article_id}",
+            get_with(get_article, |op| {
+                op.summary("Get a single article with full content")
+            }),
+        )
+        .api_route(
             "/tarang/v1/feed",
             post_with(post_feed, |op| op.summary("Add a new feed")),
         )
@@ -118,7 +125,8 @@ async fn main() {
         )
         .api_route(
             "/tarang/v1/category/{category_id}",
-            delete_with(delete_category, |op| op.summary("Delete a category")),
+            delete_with(delete_category, |op| op.summary("Delete a category"))
+                .patch_with(patch_category, |op| op.summary("Rename a category")),
         )
         .api_route(
             "/tarang/v1/filter",
@@ -168,7 +176,8 @@ async fn main() {
         .nest("/greader", greader::router())
         .layer(Extension(Arc::new(api)))
         .with_state(AppState { db, http })
-        .layer(CorsLayer::permissive());
+        .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new());
 
     let bind_addr = config.server.bind_addr();
 
