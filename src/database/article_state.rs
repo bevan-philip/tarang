@@ -1,7 +1,55 @@
-use super::{Db, DbResult};
+use super::{Db, DbError, DbResult};
 use schemars::JsonSchema;
 use serde::Serialize;
 use sqlx::{QueryBuilder, Sqlite};
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
+pub struct ArticleState {
+    pub pk: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+pub async fn update_article_state(
+    db: &Db,
+    pk: i64,
+    is_read: Option<bool>,
+    is_starred: Option<bool>,
+) -> DbResult<ArticleState> {
+    let mut tx = db.write.begin_with("BEGIN IMMEDIATE").await?;
+    let state = sqlx::query_as::<_, ArticleState>(
+        "SELECT article.pk, COALESCE(article_state.is_read, 0) AS is_read,
+                COALESCE(article_state.is_starred, 0) AS is_starred
+         FROM article LEFT JOIN article_state ON article_state.article = article.pk
+         WHERE article.pk = ?",
+    )
+    .bind(pk)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| DbError::NotFound(format!("article {pk} not found")))?;
+
+    let state = if is_read.is_some() || is_starred.is_some() {
+        sqlx::query_as::<_, ArticleState>(
+            "INSERT INTO article_state (article, is_read, is_starred)
+             VALUES (?, COALESCE(?, 0), COALESCE(?, 0))
+             ON CONFLICT(article) DO UPDATE SET
+                 is_read = COALESCE(?, article_state.is_read),
+                 is_starred = COALESCE(?, article_state.is_starred)
+             RETURNING article AS pk, is_read, is_starred",
+        )
+        .bind(pk)
+        .bind(is_read)
+        .bind(is_starred)
+        .bind(is_read)
+        .bind(is_starred)
+        .fetch_one(&mut *tx)
+        .await?
+    } else {
+        state
+    };
+    tx.commit().await?;
+    Ok(state)
+}
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct FeedUnreadCount {

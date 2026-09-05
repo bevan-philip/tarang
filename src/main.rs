@@ -1,7 +1,7 @@
 use crate::api::{
     delete_category, delete_feed, delete_filter, get_article, get_category,
     get_export_starred_articles, get_feed, get_filter, get_opml, get_starred_articles,
-    get_summary, health, patch_category, patch_feed, patch_filter, post_category, post_feed,
+    get_summary, health, patch_article, patch_category, patch_feed, patch_filter, post_category, post_feed,
     post_filter, upload_opml,
 };
 use crate::database::Db;
@@ -101,6 +101,10 @@ async fn main() {
             "/tarang/v1/article/{article_id}",
             get_with(get_article, |op| {
                 op.summary("Get a single article with full content")
+            })
+            .patch_with(patch_article, |op| {
+                op.summary("Update an article's read and starred state")
+                    .description("Sets supplied flags, including for filtered articles. Omitted or null fields are unchanged; an empty object is a no-op. Returns both resulting flags. Unknown articles return 404.")
             }),
         )
         .api_route(

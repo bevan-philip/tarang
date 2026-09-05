@@ -51,6 +51,10 @@ impl aide::OperationOutput for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
+            AppError::Db(DbError::NotFound(msg)) => {
+                tracing::warn!(error = %self, "request rejected");
+                (StatusCode::NOT_FOUND, msg.clone())
+            }
             AppError::Db(DbError::AlreadyExists(msg)) => {
                 tracing::warn!(error = %self, "request rejected");
                 (StatusCode::CONFLICT, msg.clone())
