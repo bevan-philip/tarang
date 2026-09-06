@@ -37,7 +37,7 @@ pub async fn get_feed(
 
 #[derive(Deserialize, JsonSchema)]
 pub struct PostFeedReq {
-    pub name: String,
+    pub name: Option<String>,
     pub url: String,
     pub category_id: Option<i64>,
     pub metadata: Option<String>,
@@ -61,7 +61,7 @@ pub async fn post_feed(
         &http,
         &payload.url,
         FeedOptions {
-            name: Some(&payload.name),
+            name: payload.name.as_deref(),
             category: payload.category_id,
             metadata: payload.metadata.as_deref(),
             refresh_interval: payload.refresh_interval,
@@ -123,7 +123,7 @@ pub async fn get_starred_articles(
 }
 
 #[cfg(test)]
-mod starred_tests {
+mod tests {
     use super::*;
     use crate::api::{PatchArticleReq, get_article, patch_article};
     use crate::database::Db;
@@ -142,6 +142,87 @@ mod starred_tests {
             },
             http: reqwest::Client::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn feed_name_defaults_and_explicit_overrides() {
+        use axum::{
+            Router,
+            routing::{get, post},
+        };
+
+        let state = test_state().await;
+        let app = Router::new()
+            .route("/feed", post(post_feed))
+            .route("/rss", get(|| async {
+                r#"<rss version="2.0"><channel><title>RSS title</title><link>https://example.com</link><description>Test</description></channel></rss>"#
+            }))
+            .route("/atom", get(|| async {
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom title</title><id>urn:test:feed</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+            }))
+            .route("/untitled", get(|| async {
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><id>urn:test:untitled</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+            }))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        for (path, title) in [
+            ("rss", "RSS title"),
+            ("atom", "Atom title"),
+            ("untitled", ""),
+        ] {
+            for (index, name) in [
+                None,
+                Some(serde_json::Value::Null),
+                Some(serde_json::json!("Custom")),
+                Some(serde_json::json!("")),
+                Some(serde_json::json!("  \t")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let url = format!("{base}/{path}?case={index}");
+                let mut payload = serde_json::json!({"url": url});
+                if let Some(name) = name {
+                    payload["name"] = name;
+                }
+                let expected = payload
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .unwrap_or(if path == "untitled" { &url } else { title });
+                let response = client
+                    .post(format!("{base}/feed"))
+                    .header("content-type", "application/json")
+                    .body(payload.to_string())
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK, "{payload}");
+                let body: serde_json::Value =
+                    serde_json::from_str(&response.text().await.unwrap()).unwrap();
+                assert_eq!(body["name"], expected, "{payload}");
+                let saved = list_feed(&state.db, body["id"].as_i64().unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(saved.name, expected);
+            }
+        }
+        server.abort();
+    }
+
+    #[test]
+    fn feed_name_schema_is_optional_and_nullable() {
+        let schema = serde_json::to_value(schemars::schema_for!(PostFeedReq)).unwrap();
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.contains(&serde_json::json!("name")));
+        assert!(required.contains(&serde_json::json!("url")));
+        let types = schema["properties"]["name"]["type"].as_array().unwrap();
+        assert!(types.contains(&serde_json::json!("string")));
+        assert!(types.contains(&serde_json::json!("null")));
     }
 
     #[tokio::test]

@@ -32,7 +32,7 @@ pub async fn upload_opml(
         for feed in feeds {
             let Some(category) = feed.category.as_deref() else {
                 let add_feed = PostFeedReq {
-                    name: feed.name,
+                    name: Some(feed.name),
                     url: feed.url,
                     category_id: None,
                     metadata: None,
@@ -57,7 +57,7 @@ pub async fn upload_opml(
             }
 
             let add_feed = PostFeedReq {
-                name: feed.name,
+                name: Some(feed.name),
                 url: feed.url,
                 category_id: Some(category_map[&feed.category.unwrap()]),
                 metadata: None,
