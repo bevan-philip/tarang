@@ -1,7 +1,7 @@
 use crate::api::{
     delete_category, delete_feed, delete_filter, get_article, get_category,
-    get_export_starred_articles, get_feed, get_filter, get_opml, get_starred_articles,
-    get_summary, health, patch_article, patch_category, patch_feed, patch_filter, post_category, post_feed,
+    get_export_starred_articles, get_feed, get_filter, get_opml, get_starred_articles, get_summary,
+    health, patch_article, patch_category, patch_feed, patch_filter, post_category, post_feed,
     post_filter, upload_opml,
 };
 use crate::database::Db;
@@ -145,7 +145,7 @@ async fn main() {
         .api_route(
             "/tarang/v1/starred",
             get_with(get_starred_articles, |op| {
-                op.summary("List starred articles with feed info")
+                op.summary("List starred article previews")
             }),
         )
         .api_route(

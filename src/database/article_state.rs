@@ -236,20 +236,32 @@ pub async fn list_starred_articles(db: &Db) -> DbResult<Vec<StarredArticles>> {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
-pub struct StarredArticlesWithFeed {
-    pub pk: i64,
+pub struct StarredArticlePreview {
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub feed_name: String,
     pub url: String,
-    pub content: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub published_at: Option<i64>,
+    pub retrieved_at: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
 }
 
-pub async fn list_starred_articles_with_feed(db: &Db) -> DbResult<Vec<StarredArticlesWithFeed>> {
+pub async fn list_starred_articles_with_feed(db: &Db) -> DbResult<Vec<StarredArticlePreview>> {
     let rows = sqlx::query_as!(
-        StarredArticlesWithFeed,
-        r#"SELECT feed.pk, article.url, article.content
+        StarredArticlePreview,
+        r#"SELECT article.pk AS article_id, feed.pk AS feed_id, feed.name AS feed_name,
+                  article.url, article.title, article.summary,
+                  article.published_at, article.retrieved_at,
+                  article_state.is_read AS "is_read!: bool",
+                  article_state.is_starred AS "is_starred!: bool"
            FROM article
            JOIN feed ON feed.pk = article.feed
-           LEFT JOIN  article_state ON article_state.article = article.pk
-           WHERE article_state.is_starred = 1"#
+           JOIN article_state ON article_state.article = article.pk
+           WHERE article_state.is_starred = 1
+           ORDER BY article.published_at DESC, article.pk DESC"#
     )
     .fetch_all(&db.read)
     .await?;

@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT article.pk AS article_id, feed.pk AS feed_id, feed.name AS feed_name,\n                  article.url, article.title, article.summary,\n                  article.published_at, article.retrieved_at,\n                  article_state.is_read AS \"is_read!: bool\",\n                  article_state.is_starred AS \"is_starred!: bool\"\n           FROM article\n           JOIN feed ON feed.pk = article.feed\n           JOIN article_state ON article_state.article = article.pk\n           WHERE article_state.is_starred = 1\n           ORDER BY article.published_at DESC, article.pk DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "article_id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "feed_id",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "feed_name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "summary",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "name": "published_at",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "name": "retrieved_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article",
+            "name": "retrieved_at"
+          }
+        }
+      },
+      {
+        "name": "is_read!: bool",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "is_read"
+          }
+        }
+      },
+      {
+        "name": "is_starred!: bool",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "is_starred"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "576411c8122bc28c8004d6a5ea47c4b43605ef9c80a93bc9da7c684397d7bb7f"
+}
