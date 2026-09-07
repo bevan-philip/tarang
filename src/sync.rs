@@ -1,5 +1,5 @@
 use crate::database::{Db, DbResult, list_feeds_due_for_refresh, update_feed_last_refresh};
-use crate::feed::{FeedError, FeedResult, update_feed_articles};
+use crate::feed::{FeedResult, update_feed_articles};
 use crate::filter;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
@@ -13,19 +13,23 @@ pub async fn sync_feeds(db: &Db, client: &reqwest::Client) -> DbResult<()> {
         .map(|feed| {
             let filters = Arc::clone(&filters);
             async move {
-                update_feed_articles(db, feed.pk, &feed.url, client, &filters).await?;
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
-                update_feed_last_refresh(db, feed.pk, now, now + feed.refresh_interval).await?;
-                Ok::<(), FeedError>(())
+                let result: FeedResult<()> = async {
+                    update_feed_articles(db, feed.pk, &feed.url, client, &filters).await?;
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64;
+                    update_feed_last_refresh(db, feed.pk, now, now + feed.refresh_interval).await?;
+                    Ok(())
+                }
+                .await;
+                (feed.pk, feed.url, result)
             }
         })
         .buffer_unordered(8)
-        .for_each(|res: FeedResult<()>| async {
+        .for_each(|(pk, url, res)| async move {
             if let Err(e) = res {
-                tracing::error!(error = %e, "feed sync failed");
+                tracing::error!(feed = pk, url = %url, error = %e, "feed sync failed");
             }
         })
         .await;
