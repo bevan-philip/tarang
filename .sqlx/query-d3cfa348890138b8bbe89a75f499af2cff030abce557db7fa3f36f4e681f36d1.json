@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT filter, feed FROM filter_feed",
+  "describe": {
+    "columns": [
+      {
+        "name": "filter",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter_feed",
+            "name": "filter"
+          }
+        }
+      },
+      {
+        "name": "feed",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "filter_feed",
+            "name": "feed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d3cfa348890138b8bbe89a75f499af2cff030abce557db7fa3f36f4e681f36d1"
+}

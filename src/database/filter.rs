@@ -21,6 +21,7 @@ pub async fn create_filter(
     field: &str,
     match_type: &str,
     pattern: &str,
+    feed_pks: &[i64],
 ) -> DbResult<Filter> {
     let row = sqlx::query_as!(
         Filter,
@@ -35,11 +36,15 @@ pub async fn create_filter(
     .fetch_one(&db.write)
     .await?;
 
+    replace_filter_feeds(db, row.pk, feed_pks).await?;
+
+    let feeds = (!feed_pks.is_empty()).then(|| feed_pks.iter().copied().collect());
     // compile_filter is expected to succeed here: the API handler is
     // required to call filter::validate_pattern with this same pattern
     // before persisting, so a compile failure at this point would indicate
     // a caller bypassed that check.
-    let compiled = filter::compile_filter(&row).expect("pattern already validated by caller");
+    let compiled =
+        filter::compile_filter(&row, feeds).expect("pattern already validated by caller");
     let articles = super::list_all_articles(db).await?;
     record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
 
@@ -69,15 +74,17 @@ pub async fn get_filter(db: &Db, pk: i64) -> DbResult<Option<Filter>> {
     Ok(row)
 }
 
-pub async fn update_filter(
-    db: &Db,
-    pk: i64,
-    name: Option<&str>,
-    field: Option<&str>,
-    match_type: Option<&str>,
-    pattern: Option<&str>,
-    enabled: Option<bool>,
-) -> DbResult<Filter> {
+#[derive(Debug, Default)]
+pub struct UpdateFilterFields {
+    pub name: Option<String>,
+    pub field: Option<String>,
+    pub match_type: Option<String>,
+    pub pattern: Option<String>,
+    pub enabled: Option<bool>,
+    pub feed_pks: Option<Vec<i64>>,
+}
+
+pub async fn update_filter(db: &Db, pk: i64, fields: UpdateFilterFields) -> DbResult<Filter> {
     let row = sqlx::query_as!(
         Filter,
         r#"UPDATE filter
@@ -88,21 +95,38 @@ pub async fn update_filter(
                enabled    = COALESCE(?, enabled)
            WHERE pk = ?
            RETURNING pk, name, field, match_type, pattern, enabled as "enabled: bool", created_at"#,
-        name,
-        field,
-        match_type,
-        pattern,
-        enabled,
+        fields.name.as_deref(),
+        fields.field.as_deref(),
+        fields.match_type.as_deref(),
+        fields.pattern.as_deref(),
+        fields.enabled,
         pk,
     )
     .fetch_one(&db.write)
     .await?;
 
-    if field.is_some() || match_type.is_some() || pattern.is_some() {
-        // Rule content changed - resweep against every article. Same
-        // expect() rationale as create_filter: the API handler validates
-        // the effective pattern before calling update_filter.
-        let compiled = filter::compile_filter(&row).expect("pattern already validated by caller");
+    if let Some(feed_pks) = &fields.feed_pks {
+        replace_filter_feeds(db, pk, feed_pks).await?;
+    }
+
+    if fields.field.is_some()
+        || fields.match_type.is_some()
+        || fields.pattern.is_some()
+        || fields.feed_pks.is_some()
+    {
+        // Rule content or feed scope changed - resweep against every
+        // article using the filter's current (possibly just-updated) feed
+        // set. Same expect() rationale as create_filter: the API handler
+        // validates the effective pattern before calling update_filter.
+        let feeds = match &fields.feed_pks {
+            Some(feed_pks) => (!feed_pks.is_empty()).then(|| feed_pks.iter().copied().collect()),
+            None => {
+                let current = list_filter_feed_pks(db, pk).await?;
+                (!current.is_empty()).then(|| current.into_iter().collect())
+            }
+        };
+        let compiled =
+            filter::compile_filter(&row, feeds).expect("pattern already validated by caller");
         clear_matches_for_filter(db, pk).await?;
         let articles = super::list_all_articles(db).await?;
         record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
@@ -115,6 +139,45 @@ pub async fn drop_filter(db: &Db, pk: i64) -> DbResult<()> {
     sqlx::query!("DELETE FROM filter WHERE pk = ?", pk)
         .execute(&db.write)
         .await?;
+
+    Ok(())
+}
+
+pub async fn list_filter_feed_pks(db: &Db, filter_pk: i64) -> DbResult<Vec<i64>> {
+    let rows = sqlx::query_scalar!(
+        "SELECT feed FROM filter_feed WHERE filter = ? ORDER BY feed",
+        filter_pk
+    )
+    .fetch_all(&db.read)
+    .await?;
+
+    Ok(rows)
+}
+
+pub async fn list_all_filter_feed_pairs(db: &Db) -> DbResult<Vec<(i64, i64)>> {
+    let rows = sqlx::query!("SELECT filter, feed FROM filter_feed")
+        .fetch_all(&db.read)
+        .await?;
+
+    Ok(rows.into_iter().map(|r| (r.filter, r.feed)).collect())
+}
+
+pub async fn replace_filter_feeds(db: &Db, filter_pk: i64, feed_pks: &[i64]) -> DbResult<()> {
+    sqlx::query!("DELETE FROM filter_feed WHERE filter = ?", filter_pk)
+        .execute(&db.write)
+        .await?;
+
+    if feed_pks.is_empty() {
+        return Ok(());
+    }
+
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("INSERT INTO filter_feed (filter, feed) ");
+
+    qb.push_values(feed_pks, |mut b, feed_pk| {
+        b.push_bind(filter_pk).push_bind(feed_pk);
+    });
+
+    qb.build().execute(&db.write).await?;
 
     Ok(())
 }
@@ -182,7 +245,7 @@ pub async fn record_filter_matches(
             let content = article.content.as_str();
             filters
                 .iter()
-                .filter(move |f| filter::matches(f, title, content))
+                .filter(move |f| f.applies_to(article.feed) && filter::matches(f, title, content))
                 .map(|f| (article.pk, f.pk))
         })
         .collect();

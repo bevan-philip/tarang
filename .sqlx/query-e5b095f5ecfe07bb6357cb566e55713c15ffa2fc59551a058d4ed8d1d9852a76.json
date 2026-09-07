@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM filter_feed WHERE filter = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e5b095f5ecfe07bb6357cb566e55713c15ffa2fc59551a058d4ed8d1d9852a76"
+}
