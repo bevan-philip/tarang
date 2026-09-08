@@ -1,13 +1,17 @@
 use serde::Deserialize;
+use std::path::Path;
 use std::time::Duration;
 
 const CONFIG_FILE: &str = "config.toml";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("failed to read {CONFIG_FILE}: {0}")]
-    Read(#[from] std::io::Error),
-    #[error("failed to parse {CONFIG_FILE}: {0}")]
+    #[error("failed to read {path}: {source}")]
+    Read {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to parse config: {0}")]
     Parse(#[from] toml::de::Error),
 }
 
@@ -22,15 +26,29 @@ pub struct Config {
 }
 
 impl Config {
+    /// Parses TOML text into a Config. Missing fields fall back to defaults.
+    pub fn from_toml_str(contents: &str) -> Result<Config, ConfigError> {
+        Ok(toml::from_str(contents)?)
+    }
+
+    pub fn load_from(path: &Path) -> Result<Config, ConfigError> {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
+        Config::from_toml_str(&contents)
+    }
+
     /// Loads configuration from `config.toml` in the current working directory.
     /// A missing file is not an error; every setting falls back to its default.
     pub fn load() -> Result<Config, ConfigError> {
-        let contents = match std::fs::read_to_string(CONFIG_FILE) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(toml::from_str(&contents)?)
+        Config::load_from(Path::new(CONFIG_FILE))
     }
 }
 
@@ -136,5 +154,68 @@ impl Default for BackupConfig {
             every_n_polls: 12,
             path: "backup.db".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_toml_falls_back_to_defaults() {
+        let config = Config::from_toml_str("").unwrap();
+        assert_eq!(config.server.port, 3000);
+        assert_eq!(config.database.path, "app.db");
+        assert_eq!(config.http.timeout_secs, 30);
+        assert_eq!(config.sync.poll_interval_secs, 300);
+        assert!(!config.backup.enabled);
+    }
+
+    #[test]
+    fn partial_overrides_only_change_specified_fields() {
+        let config = Config::from_toml_str(
+            r#"
+            [server]
+            port = 8080
+
+            [backup]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.server.host, "127.0.0.1");
+        assert!(config.backup.enabled);
+        assert_eq!(config.backup.every_n_polls, 12);
+    }
+
+    #[test]
+    fn invalid_toml_is_a_parse_error() {
+        let result = Config::from_toml_str("this is not valid toml [[[");
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn load_from_missing_path_falls_back_to_defaults() {
+        let path = std::env::temp_dir().join(format!(
+            "tarang-config-test-missing-{}.toml",
+            std::process::id()
+        ));
+        let config = Config::load_from(&path).unwrap();
+        assert_eq!(config.server.port, 3000);
+    }
+
+    #[test]
+    fn load_from_reads_real_file() {
+        let path = std::env::temp_dir().join(format!(
+            "tarang-config-test-real-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, "[server]\nport = 4242\n").unwrap();
+
+        let config = Config::load_from(&path).unwrap();
+        assert_eq!(config.server.port, 4242);
+
+        std::fs::remove_file(&path).unwrap();
     }
 }

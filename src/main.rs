@@ -65,8 +65,16 @@ async fn main() {
         let mut interval = tokio::time::interval(sync_interval);
         let mut polls_since_backup: u32 = 0;
         loop {
-            if let Err(e) = sync::sync_feeds(&sync_db, &sync_http).await {
-                tracing::error!(error = %e, "sync_feeds failed");
+            match sync::sync_feeds_now(&sync_db, &sync_http).await {
+                Ok(summary) if summary.failed > 0 => {
+                    tracing::warn!(
+                        succeeded = summary.succeeded,
+                        failed = summary.failed,
+                        "sync_feeds completed with failures"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::error!(error = %e, "sync_feeds failed"),
             }
 
             if backup_enabled && backup_every_n_polls > 0 {

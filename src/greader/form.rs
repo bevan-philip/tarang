@@ -28,6 +28,13 @@ impl MergedParams {
                 .push(v.into_owned());
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_query(query: &str) -> Self {
+        let mut params = Self::default();
+        params.merge(query);
+        params
+    }
 }
 
 impl<S> FromRequest<S> for MergedParams

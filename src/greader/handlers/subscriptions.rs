@@ -2,14 +2,15 @@ use axum::Json;
 use axum::extract::State;
 use std::collections::HashMap;
 
-use super::{label_names, resolve_feed_pk};
+use super::resolve_feed_pk;
 use crate::AppState;
 use crate::database::{
-    Category, DbError, create_category, drop_category, drop_feed, get_category_by_name,
+    Category, Db, DbError, create_category, drop_category, drop_feed, get_category_by_name,
     list_categories, list_feed, list_feeds, rename_category, update_feed,
 };
 use crate::feed::{FeedError, FeedOptions, create_feed_with_articles};
 use crate::greader::GReaderError;
+use crate::greader::commands::{self, CategoryChangeIntent, SubscriptionEditCommand};
 use crate::greader::form::MergedParams;
 use crate::greader::ids::{FeedRef, StreamId};
 use crate::greader::responses::{
@@ -99,29 +100,12 @@ pub async fn subscription_quickadd(
     }))
 }
 
-async fn resolve_category_from_add(
-    db: &crate::database::Db,
-    params: &MergedParams,
-) -> Result<Option<i64>, GReaderError> {
-    let labels = label_names(params.get_all("a"));
-    let mut distinct: Vec<&String> = labels.iter().collect();
-    distinct.dedup();
-    if distinct.len() > 1 {
-        return Err(GReaderError::BadRequest(
-            "ambiguous: multiple labels in a single edit".into(),
-        ));
-    }
-
-    match labels.first() {
-        Some(label) => {
-            let category = match get_category_by_name(db, label).await? {
-                Some(c) => c,
-                None => create_category(db, label).await?,
-            };
-            Ok(Some(category.pk))
-        }
-        None => Ok(None),
-    }
+async fn get_or_create_category_pk(db: &Db, label: &str) -> Result<i64, GReaderError> {
+    let category = match get_category_by_name(db, label).await? {
+        Some(c) => c,
+        None => create_category(db, label).await?,
+    };
+    Ok(category.pk)
 }
 
 pub async fn subscription_edit(
@@ -135,26 +119,31 @@ pub async fn subscription_edit(
         .get("s")
         .ok_or_else(|| GReaderError::BadRequest("missing s".into()))?;
 
-    let StreamId::Feed(feed_ref) = StreamId::parse(stream)? else {
-        return Err(GReaderError::BadRequest("s must be a feed stream".into()));
-    };
+    let command = commands::parse_subscription_edit(
+        action,
+        stream,
+        params.get("t"),
+        params.get_all("a"),
+        params.get_all("r"),
+    )?;
 
-    match action {
-        "subscribe" => {
-            let FeedRef::Url(url) = &feed_ref else {
-                return Err(GReaderError::BadRequest(
-                    "subscribe requires a feed url".into(),
-                ));
+    match command {
+        SubscriptionEditCommand::Subscribe {
+            url,
+            title,
+            category_label,
+        } => {
+            let category_pk = match category_label {
+                Some(label) => Some(get_or_create_category_pk(&db, &label).await?),
+                None => None,
             };
-            let title = params.get("t");
-            let category_pk = resolve_category_from_add(&db, &params).await?;
 
             match create_feed_with_articles(
                 &db,
                 &http,
-                url,
+                &url,
                 FeedOptions {
-                    name: title,
+                    name: title.as_deref(),
                     category: category_pk,
                     ..Default::default()
                 },
@@ -166,49 +155,37 @@ pub async fn subscription_edit(
                 Err(e) => return Err(e.into()),
             }
         }
-        "unsubscribe" => {
+        SubscriptionEditCommand::Unsubscribe { feed_ref } => {
             let pk = resolve_feed_pk(&db, &feed_ref).await?;
             drop_feed(&db, pk).await?;
         }
-        "edit" => {
+        SubscriptionEditCommand::Edit {
+            feed_ref,
+            title,
+            category_change,
+        } => {
             let pk = resolve_feed_pk(&db, &feed_ref).await?;
             let feed = list_feed(&db, pk)
                 .await?
                 .ok_or_else(|| GReaderError::BadRequest(format!("feed {pk} not found")))?;
 
-            let add_labels = label_names(params.get_all("a"));
-            let remove_labels = label_names(params.get_all("r"));
-
-            let mut distinct_add: Vec<&String> = add_labels.iter().collect();
-            distinct_add.dedup();
-            if distinct_add.len() > 1 {
-                return Err(GReaderError::BadRequest(
-                    "ambiguous: multiple labels in a single edit".into(),
-                ));
-            }
-
-            let title = params.get("t");
-
-            let new_category = if let Some(label) = add_labels.first() {
-                let category = match get_category_by_name(&db, label).await? {
-                    Some(c) => c,
-                    None => create_category(&db, label).await?,
-                };
-                Some(Some(category.pk))
-            } else if let Some(label) = remove_labels.first() {
-                match get_category_by_name(&db, label).await? {
-                    Some(c) if feed.category == Some(c.pk) => Some(None),
-                    _ => None,
+            let new_category = match category_change {
+                CategoryChangeIntent::Add(label) => {
+                    Some(Some(get_or_create_category_pk(&db, &label).await?))
                 }
-            } else {
-                None
+                CategoryChangeIntent::RemoveIfCurrent(label) => {
+                    match get_category_by_name(&db, &label).await? {
+                        Some(c) if feed.category == Some(c.pk) => Some(None),
+                        _ => None,
+                    }
+                }
+                CategoryChangeIntent::None => None,
             };
 
             if title.is_some() || new_category.is_some() {
-                update_feed(&db, pk, title, None, None, new_category, None).await?;
+                update_feed(&db, pk, title.as_deref(), None, None, new_category, None).await?;
             }
         }
-        other => return Err(GReaderError::BadRequest(format!("unknown ac: {other}"))),
     }
 
     Ok("OK")

@@ -9,6 +9,7 @@ use crate::AppState;
 use crate::database::DbError;
 use crate::feed::FeedError;
 
+pub mod commands;
 pub mod form;
 pub mod handlers;
 pub mod ids;

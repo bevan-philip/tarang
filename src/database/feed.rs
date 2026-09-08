@@ -87,12 +87,13 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
     Ok(feeds)
 }
 
-pub async fn list_feeds_due_for_refresh(db: &Db) -> DbResult<Vec<Feed>> {
+pub async fn list_feeds_due_for_refresh_at(db: &Db, now: i64) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
         r#"SELECT pk, name, url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
            FROM feed
-           WHERE next_poll_at IS NULL OR next_poll_at <= unixepoch()"#,
+           WHERE next_poll_at IS NULL OR next_poll_at <= ?"#,
+        now,
     )
     .fetch_all(&db.read)
     .await?;
@@ -160,4 +161,152 @@ pub async fn drop_feed(db: &Db, pk: i64) -> DbResult<()> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_db() -> Db {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        Db {
+            read: pool.clone(),
+            write: pool,
+        }
+    }
+
+    #[tokio::test]
+    async fn null_next_poll_at_is_always_due() {
+        let db = test_db().await;
+        create_feed(
+            &db,
+            "Feed",
+            "https://example.com/feed",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let due = list_feeds_due_for_refresh_at(&db, 1000).await.unwrap();
+        assert_eq!(due.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn next_poll_at_relative_to_now() {
+        let db = test_db().await;
+        let past = create_feed(
+            &db,
+            "Past",
+            "https://example.com/past",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let equal = create_feed(
+            &db,
+            "Equal",
+            "https://example.com/equal",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let future = create_feed(
+            &db,
+            "Future",
+            "https://example.com/future",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        update_feed_last_refresh(&db, past.pk, 500, 500)
+            .await
+            .unwrap();
+        update_feed_last_refresh(&db, equal.pk, 500, 1000)
+            .await
+            .unwrap();
+        update_feed_last_refresh(&db, future.pk, 500, 1500)
+            .await
+            .unwrap();
+
+        let due = list_feeds_due_for_refresh_at(&db, 1000).await.unwrap();
+        let due_pks: std::collections::HashSet<i64> = due.iter().map(|f| f.pk).collect();
+
+        assert!(due_pks.contains(&past.pk));
+        assert!(
+            due_pks.contains(&equal.pk),
+            "next_poll_at == now should be due"
+        );
+        assert!(!due_pks.contains(&future.pk));
+    }
+
+    #[tokio::test]
+    async fn mixed_set_returns_exactly_the_due_ones() {
+        let db = test_db().await;
+        let due_null = create_feed(
+            &db,
+            "Null",
+            "https://example.com/null",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let due_past = create_feed(
+            &db,
+            "Past",
+            "https://example.com/past2",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let not_due = create_feed(
+            &db,
+            "Future",
+            "https://example.com/future2",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        update_feed_last_refresh(&db, due_past.pk, 500, 900)
+            .await
+            .unwrap();
+        update_feed_last_refresh(&db, not_due.pk, 500, 2000)
+            .await
+            .unwrap();
+
+        let due = list_feeds_due_for_refresh_at(&db, 1000).await.unwrap();
+        let due_pks: std::collections::HashSet<i64> = due.iter().map(|f| f.pk).collect();
+
+        assert_eq!(
+            due_pks,
+            std::collections::HashSet::from([due_null.pk, due_past.pk])
+        );
+    }
 }

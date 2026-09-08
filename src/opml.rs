@@ -27,7 +27,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
     })
 }
 
-pub async fn parse_opml(opml_string: &str) -> OpmlResult<Vec<ImportedFeed>> {
+pub fn parse_opml(opml_string: &str) -> OpmlResult<Vec<ImportedFeed>> {
     let parsed = OPML::from_str(opml_string)?;
 
     let mut imported_feeds: Vec<ImportedFeed> = Vec::new();
@@ -52,7 +52,7 @@ pub async fn parse_opml(opml_string: &str) -> OpmlResult<Vec<ImportedFeed>> {
     Ok(imported_feeds)
 }
 
-pub async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlResult<String> {
+pub fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlResult<String> {
     let mut outlines: Vec<Outline> = Vec::new();
 
     let mut feeds_by_category: HashMap<Option<i64>, Vec<Feed>> =
@@ -114,8 +114,8 @@ pub async fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlRes
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn flat_feeds_only() {
+    #[test]
+    fn flat_feeds_only() {
         let opml = r#"<?xml version="1.0"?>
 <opml version="2.0">
   <head><title>Test</title></head>
@@ -125,13 +125,13 @@ mod tests {
   </body>
 </opml>"#;
 
-        let feeds = parse_opml(opml).await.unwrap();
+        let feeds = parse_opml(opml).unwrap();
         assert_eq!(feeds.len(), 2);
         assert!(feeds.iter().all(|f| f.category.is_none()));
     }
 
-    #[tokio::test]
-    async fn one_level_of_category_nesting() {
+    #[test]
+    fn one_level_of_category_nesting() {
         let opml = r#"<?xml version="1.0"?>
 <opml version="2.0">
   <head><title>Test</title></head>
@@ -143,7 +143,7 @@ mod tests {
   </body>
 </opml>"#;
 
-        let feeds = parse_opml(opml).await.unwrap();
+        let feeds = parse_opml(opml).unwrap();
         assert_eq!(feeds.len(), 2);
         assert_eq!(
             feeds
@@ -163,8 +163,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn deep_nesting_is_silently_dropped() {
+    #[test]
+    fn deep_nesting_is_silently_dropped() {
         let opml = r#"<?xml version="1.0"?>
 <opml version="2.0">
   <head><title>Test</title></head>
@@ -178,7 +178,7 @@ mod tests {
   </body>
 </opml>"#;
 
-        let feeds = parse_opml(opml).await.unwrap();
+        let feeds = parse_opml(opml).unwrap();
         assert_eq!(feeds.len(), 1);
         assert_eq!(feeds[0].url, "https://example.com/one.xml");
         assert_eq!(feeds[0].category, Some("News".to_string()));
@@ -198,14 +198,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn export_uncategorized_feeds_are_flat() {
+    #[test]
+    fn export_uncategorized_feeds_are_flat() {
         let feeds = vec![
             make_feed(1, "Feed One", "https://example.com/one.xml", None),
             make_feed(2, "Feed Two", "https://example.com/two.xml", None),
         ];
 
-        let xml = export_opml(feeds, vec![]).await.unwrap();
+        let xml = export_opml(feeds, vec![]).unwrap();
         let parsed = OPML::from_str(&xml).unwrap();
 
         assert_eq!(parsed.body.outlines.len(), 2);
@@ -229,8 +229,8 @@ mod tests {
         assert_eq!(two.xml_url, Some("https://example.com/two.xml".to_string()));
     }
 
-    #[tokio::test]
-    async fn export_groups_feeds_by_category() {
+    #[test]
+    fn export_groups_feeds_by_category() {
         let feeds = vec![
             make_feed(1, "Feed One", "https://example.com/one.xml", Some(10)),
             make_feed(2, "Feed Two", "https://example.com/two.xml", Some(20)),
@@ -247,7 +247,7 @@ mod tests {
             },
         ];
 
-        let xml = export_opml(feeds, categories).await.unwrap();
+        let xml = export_opml(feeds, categories).unwrap();
         let parsed = OPML::from_str(&xml).unwrap();
 
         assert_eq!(parsed.body.outlines.len(), 3);
@@ -289,8 +289,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn export_feeds_with_unknown_category_are_dropped() {
+    #[test]
+    fn export_feeds_with_unknown_category_are_dropped() {
         let feeds = vec![make_feed(
             1,
             "Feed One",
@@ -298,7 +298,7 @@ mod tests {
             Some(99),
         )];
 
-        let xml = export_opml(feeds, vec![]).await.unwrap();
+        let xml = export_opml(feeds, vec![]).unwrap();
 
         // The exported body ends up with no outlines at all, since the feed's
         // category (99) never matches any category in `categories` and so is

@@ -39,12 +39,12 @@ pub async fn create_filter(
     replace_filter_feeds(db, row.pk, feed_pks).await?;
 
     let feeds = (!feed_pks.is_empty()).then(|| feed_pks.iter().copied().collect());
-    // compile_filter is expected to succeed here: the API handler is
-    // required to call filter::validate_pattern with this same pattern
-    // before persisting, so a compile failure at this point would indicate
-    // a caller bypassed that check.
-    let compiled =
-        filter::compile_filter(&row, feeds).expect("pattern already validated by caller");
+    // The API handler is expected to call filter::validate_pattern (or
+    // validate_effective_rule) with this same pattern before persisting, so
+    // compile_filter failing here should not happen in practice. This `?`
+    // is defense-in-depth, not a hard contract - if it ever does fail, the
+    // caller gets an ordinary error instead of a panic.
+    let compiled = filter::compile_filter(&row, feeds)?;
     let articles = super::list_all_articles(db).await?;
     record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
 
@@ -116,8 +116,9 @@ pub async fn update_filter(db: &Db, pk: i64, fields: UpdateFilterFields) -> DbRe
     {
         // Rule content or feed scope changed - resweep against every
         // article using the filter's current (possibly just-updated) feed
-        // set. Same expect() rationale as create_filter: the API handler
-        // validates the effective pattern before calling update_filter.
+        // set. Same `?` rationale as create_filter: the API handler
+        // validates the effective pattern before calling update_filter, so
+        // this is defense-in-depth rather than a hard contract.
         let feeds = match &fields.feed_pks {
             Some(feed_pks) => (!feed_pks.is_empty()).then(|| feed_pks.iter().copied().collect()),
             None => {
@@ -125,8 +126,7 @@ pub async fn update_filter(db: &Db, pk: i64, fields: UpdateFilterFields) -> DbRe
                 (!current.is_empty()).then(|| current.into_iter().collect())
             }
         };
-        let compiled =
-            filter::compile_filter(&row, feeds).expect("pattern already validated by caller");
+        let compiled = filter::compile_filter(&row, feeds)?;
         clear_matches_for_filter(db, pk).await?;
         let articles = super::list_all_articles(db).await?;
         record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
@@ -238,17 +238,7 @@ pub async fn record_filter_matches(
         return Ok(());
     }
 
-    let pairs: Vec<(i64, i64)> = articles
-        .iter()
-        .flat_map(|article| {
-            let title = article.title.as_deref().unwrap_or("");
-            let content = article.content.as_str();
-            filters
-                .iter()
-                .filter(move |f| f.applies_to(article.feed) && filter::matches(f, title, content))
-                .map(|f| (article.pk, f.pk))
-        })
-        .collect();
+    let pairs = filter::compute_filter_matches(articles, filters);
 
     if pairs.is_empty() {
         return Ok(());

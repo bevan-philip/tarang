@@ -28,6 +28,8 @@ pub enum DbError {
     Sqlx(sqlx::Error),
     #[error(transparent)]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("invalid filter pattern: {0}")]
+    InvalidPattern(#[from] regex::Error),
 }
 
 impl From<sqlx::Error> for DbError {

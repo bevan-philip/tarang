@@ -18,6 +18,7 @@ use crate::greader::responses::{
     UnreadCountEntry, UnreadCountResponse,
 };
 
+#[derive(Debug, PartialEq)]
 struct StreamParams {
     n: i64,
     c: Option<i64>,
@@ -52,11 +53,7 @@ fn parse_stream_params(params: &MergedParams) -> StreamParams {
     }
 }
 
-async fn stream_to_query(
-    db: &Db,
-    stream: &StreamId,
-    sp: &StreamParams,
-) -> Result<ArticleQuery, GReaderError> {
+fn build_base_query(stream: &StreamId, sp: &StreamParams) -> ArticleQuery {
     let mut q = ArticleQuery {
         published_after: sp.ot,
         published_before: sp.nt,
@@ -66,8 +63,25 @@ async fn stream_to_query(
         ..Default::default()
     };
 
+    if *stream == StreamId::Starred {
+        q.starred_only = true;
+    }
+
+    if sp.exclude_read {
+        q.unread_only = true;
+    }
+
+    q
+}
+
+async fn stream_to_query(
+    db: &Db,
+    stream: &StreamId,
+    sp: &StreamParams,
+) -> Result<ArticleQuery, GReaderError> {
+    let mut q = build_base_query(stream, sp);
+
     match stream {
-        StreamId::Starred => q.starred_only = true,
         StreamId::Label(name) => {
             let category = get_category_by_name(db, name)
                 .await?
@@ -78,10 +92,6 @@ async fn stream_to_query(
             q.feed = Some(resolve_feed_pk(db, feed_ref).await?);
         }
         _ => {}
-    }
-
-    if sp.exclude_read {
-        q.unread_only = true;
     }
 
     Ok(q)
@@ -301,4 +311,95 @@ pub async fn unread_count(
         max: 1000,
         unreadcounts: counts,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_stream_params_defaults() {
+        let params = MergedParams::from_query("");
+        let sp = parse_stream_params(&params);
+        assert_eq!(sp.n, 20);
+        assert_eq!(sp.c, None);
+        assert_eq!(sp.ot, None);
+        assert_eq!(sp.nt, None);
+        assert!(!sp.ascending);
+        assert!(!sp.exclude_read);
+    }
+
+    #[test]
+    fn parse_stream_params_clamps_n() {
+        let sp = parse_stream_params(&MergedParams::from_query("n=0"));
+        assert_eq!(sp.n, 1);
+        let sp = parse_stream_params(&MergedParams::from_query("n=5000"));
+        assert_eq!(sp.n, 1000);
+        let sp = parse_stream_params(&MergedParams::from_query("n=not-a-number"));
+        assert_eq!(sp.n, 20);
+    }
+
+    #[test]
+    fn parse_stream_params_r_o_is_ascending() {
+        let sp = parse_stream_params(&MergedParams::from_query("r=o"));
+        assert!(sp.ascending);
+        let sp = parse_stream_params(&MergedParams::from_query("r=n"));
+        assert!(!sp.ascending);
+    }
+
+    #[test]
+    fn parse_stream_params_xt_read_excludes_read() {
+        let sp = parse_stream_params(&MergedParams::from_query(
+            "xt=user%2F-%2Fstate%2Fcom.google%2Fread",
+        ));
+        assert!(sp.exclude_read);
+        let sp = parse_stream_params(&MergedParams::from_query("xt=something-else"));
+        assert!(!sp.exclude_read);
+    }
+
+    fn default_stream_params() -> StreamParams {
+        StreamParams {
+            n: 20,
+            c: None,
+            ot: None,
+            nt: None,
+            ascending: false,
+            exclude_read: false,
+        }
+    }
+
+    #[test]
+    fn build_base_query_starred_sets_starred_only() {
+        let q = build_base_query(&StreamId::Starred, &default_stream_params());
+        assert!(q.starred_only);
+        assert_eq!(q.feed, None);
+        assert_eq!(q.category, None);
+    }
+
+    #[test]
+    fn build_base_query_reading_list_has_no_scope() {
+        let q = build_base_query(&StreamId::ReadingList, &default_stream_params());
+        assert!(!q.starred_only);
+        assert_eq!(q.feed, None);
+        assert_eq!(q.category, None);
+    }
+
+    #[test]
+    fn build_base_query_passes_through_paging_fields() {
+        let sp = StreamParams {
+            n: 50,
+            c: Some(123),
+            ot: Some(1000),
+            nt: Some(2000),
+            ascending: true,
+            exclude_read: true,
+        };
+        let q = build_base_query(&StreamId::ReadingList, &sp);
+        assert_eq!(q.limit, 50);
+        assert_eq!(q.cursor, Some(123));
+        assert_eq!(q.published_after, Some(1000));
+        assert_eq!(q.published_before, Some(2000));
+        assert!(q.ascending);
+        assert!(q.unread_only);
+    }
 }

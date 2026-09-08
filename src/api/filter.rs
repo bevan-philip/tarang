@@ -11,7 +11,7 @@ use super::AppError;
 use crate::{
     AppState,
     database::{self, Article, DbError, Filter},
-    filter::{self, MatchType},
+    filter,
 };
 
 #[derive(Serialize, JsonSchema)]
@@ -46,10 +46,9 @@ pub async fn post_filter(
     State(AppState { db, .. }): State<AppState>,
     Json(payload): Json<PostFilterReq>,
 ) -> Result<Json<FilterWithMatches>, AppError> {
-    let match_type = parse_match_type(&payload.match_type);
-    // Validated here so create_filter's compile_filter().expect() cannot
-    // observe an invalid pattern.
-    filter::validate_pattern(match_type, &payload.pattern)?;
+    // Validated here so create_filter's compile_filter() cannot observe an
+    // invalid pattern.
+    filter::validate_effective_rule(None, Some(&payload.match_type), Some(&payload.pattern))?;
 
     let field = payload.field.as_deref().unwrap_or("both");
     let feed_pks = payload.feeds.as_deref().unwrap_or(&[]);
@@ -110,19 +109,17 @@ pub async fn patch_filter(
     Path(id): Path<i64>,
     Json(payload): Json<PatchFilterReq>,
 ) -> Result<Json<FilterWithMatches>, AppError> {
-    if let Some(pattern) = payload.pattern.as_deref() {
+    if payload.match_type.is_some() || payload.pattern.is_some() {
         // A client tweaking the pattern shouldn't have to resend
         // match_type - fall back to the row's existing value.
-        let match_type = match &payload.match_type {
-            Some(mt) => mt.clone(),
-            None => {
-                let existing = database::get_filter(&db, id)
-                    .await?
-                    .ok_or_else(|| DbError::NotFound(format!("filter {id} not found")))?;
-                existing.match_type
-            }
-        };
-        filter::validate_pattern(parse_match_type(&match_type), pattern)?;
+        let existing = database::get_filter(&db, id)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("filter {id} not found")))?;
+        filter::validate_effective_rule(
+            Some(&existing),
+            payload.match_type.as_deref(),
+            payload.pattern.as_deref(),
+        )?;
     }
 
     let updated = database::update_filter(
@@ -154,16 +151,6 @@ pub async fn delete_filter(
 ) -> Result<StatusCode, AppError> {
     database::drop_filter(&db, id).await?;
     Ok(StatusCode::OK)
-}
-
-/// Mirrors `filter::compile_filter`'s leniency: an unrecognized match_type
-/// string falls back to Contains here (so it's always safe to validate),
-/// and is rejected by the `filter` table's CHECK constraint at insert time.
-fn parse_match_type(raw: &str) -> MatchType {
-    match raw {
-        "regex" => MatchType::Regex,
-        _ => MatchType::Contains,
-    }
 }
 
 #[cfg(test)]
@@ -355,5 +342,45 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn patching_match_type_alone_against_invalid_pattern_errors_cleanly() {
+        let state = test_state().await;
+
+        let Json(created) = post_filter(
+            State(state.clone()),
+            Json(PostFilterReq {
+                name: "Odd pattern".to_string(),
+                field: None,
+                match_type: "contains".to_string(),
+                pattern: "(unclosed".to_string(),
+                feeds: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let result = patch_filter(
+            State(state.clone()),
+            Path(created.filter.pk),
+            Json(PatchFilterReq {
+                name: None,
+                field: None,
+                match_type: Some("regex".to_string()),
+                pattern: None,
+                enabled: None,
+                feeds: None,
+            }),
+        )
+        .await;
+        assert!(result.is_err(), "expected a clean error, not a panic");
+
+        let stored = database::get_filter(&state.db, created.filter.pk)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.match_type, "contains");
+        assert_eq!(stored.pattern, "(unclosed");
     }
 }
