@@ -69,3 +69,74 @@ pub async fn mark_all_as_read(
 
     Ok("OK")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::{Db, ParsedArticle, create_articles, create_feed};
+    use chrono::Utc;
+
+    async fn test_state() -> AppState {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        AppState {
+            db: Db {
+                read: pool.clone(),
+                write: pool,
+            },
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn edit_tag_ignores_nonexistent_pk_in_batch() {
+        let state = test_state().await;
+        let feed = create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let articles = create_articles(
+            &state.db,
+            feed.pk,
+            &[ParsedArticle {
+                url: "https://example.com/article".into(),
+                guid: "guid-1".into(),
+                title: Some("Title".into()),
+                content: "content".into(),
+                summary: None,
+                published_at: Utc::now(),
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+        let valid_pk = articles[0].pk;
+        let nonexistent_pk = valid_pk + 1000;
+
+        let query = format!("i={valid_pk}&i={nonexistent_pk}&a=user/-/state/com.google/read");
+        let params = MergedParams::from_query(&query);
+
+        let result = edit_tag(State(state.clone()), params).await;
+        assert!(result.is_ok());
+
+        let stored = sqlx::query_scalar!(
+            "SELECT is_read FROM article_state WHERE article = ?",
+            valid_pk
+        )
+        .fetch_one(&state.db.read)
+        .await
+        .unwrap();
+        assert_eq!(stored, 1);
+    }
+}

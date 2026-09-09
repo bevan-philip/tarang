@@ -69,15 +69,27 @@ pub async fn mark_articles_read(db: &Db, article_pks: &[i64], is_read: bool) -> 
     }
 
     let mut qb: QueryBuilder<Sqlite> =
-        QueryBuilder::new("INSERT INTO article_state (article, is_read) ");
+        QueryBuilder::new("INSERT INTO article_state (article, is_read) SELECT pk, ");
+    qb.push_bind(is_read);
+    qb.push(" FROM article WHERE pk IN (");
+    {
+        let mut sep = qb.separated(", ");
+        for pk in article_pks {
+            sep.push_bind(pk);
+        }
+    }
+    qb.push(") ON CONFLICT(article) DO UPDATE SET is_read = excluded.is_read");
 
-    qb.push_values(article_pks, |mut b, pk| {
-        b.push_bind(pk).push_bind(is_read);
-    });
+    let result = qb.build().execute(&db.write).await?;
 
-    qb.push(" ON CONFLICT(article) DO UPDATE SET is_read = excluded.is_read");
-
-    qb.build().execute(&db.write).await?;
+    let requested: std::collections::HashSet<i64> = article_pks.iter().copied().collect();
+    if (result.rows_affected() as usize) < requested.len() {
+        tracing::warn!(
+            requested = requested.len(),
+            applied = result.rows_affected(),
+            "edit-tag: some requested article ids do not exist; skipped"
+        );
+    }
 
     Ok(())
 }
@@ -88,15 +100,27 @@ pub async fn mark_articles_starred(db: &Db, article_pks: &[i64], is_starred: boo
     }
 
     let mut qb: QueryBuilder<Sqlite> =
-        QueryBuilder::new("INSERT INTO article_state (article, is_starred) ");
+        QueryBuilder::new("INSERT INTO article_state (article, is_starred) SELECT pk, ");
+    qb.push_bind(is_starred);
+    qb.push(" FROM article WHERE pk IN (");
+    {
+        let mut sep = qb.separated(", ");
+        for pk in article_pks {
+            sep.push_bind(pk);
+        }
+    }
+    qb.push(") ON CONFLICT(article) DO UPDATE SET is_starred = excluded.is_starred");
 
-    qb.push_values(article_pks, |mut b, pk| {
-        b.push_bind(pk).push_bind(is_starred);
-    });
+    let result = qb.build().execute(&db.write).await?;
 
-    qb.push(" ON CONFLICT(article) DO UPDATE SET is_starred = excluded.is_starred");
-
-    qb.build().execute(&db.write).await?;
+    let requested: std::collections::HashSet<i64> = article_pks.iter().copied().collect();
+    if (result.rows_affected() as usize) < requested.len() {
+        tracing::warn!(
+            requested = requested.len(),
+            applied = result.rows_affected(),
+            "edit-tag: some requested article ids do not exist; skipped"
+        );
+    }
 
     Ok(())
 }
@@ -267,4 +291,134 @@ pub async fn list_starred_articles_with_feed(db: &Db) -> DbResult<Vec<StarredArt
     .await?;
 
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::{ParsedArticle, create_articles, create_feed};
+    use chrono::Utc;
+
+    async fn test_db() -> Db {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        Db {
+            read: pool.clone(),
+            write: pool,
+        }
+    }
+
+    async fn seed_article(db: &Db) -> i64 {
+        let feed = create_feed(
+            db,
+            "Feed",
+            "https://example.com/feed",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let articles = create_articles(
+            db,
+            feed.pk,
+            &[ParsedArticle {
+                url: "https://example.com/article".into(),
+                guid: "guid-1".into(),
+                title: Some("Title".into()),
+                content: "content".into(),
+                summary: None,
+                published_at: Utc::now(),
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        articles[0].pk
+    }
+
+    #[tokio::test]
+    async fn mark_articles_read_skips_nonexistent_pks() {
+        let db = test_db().await;
+        let valid_pk = seed_article(&db).await;
+        let nonexistent_pk = valid_pk + 1000;
+
+        mark_articles_read(&db, &[valid_pk, nonexistent_pk], true)
+            .await
+            .unwrap();
+
+        let state = sqlx::query_scalar!(
+            "SELECT is_read FROM article_state WHERE article = ?",
+            valid_pk
+        )
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+        assert_eq!(state, 1);
+    }
+
+    #[tokio::test]
+    async fn mark_articles_read_dedups_repeated_pk() {
+        let db = test_db().await;
+        let valid_pk = seed_article(&db).await;
+
+        mark_articles_read(&db, &[valid_pk, valid_pk], true)
+            .await
+            .unwrap();
+
+        let state = sqlx::query_scalar!(
+            "SELECT is_read FROM article_state WHERE article = ?",
+            valid_pk
+        )
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+        assert_eq!(state, 1);
+    }
+
+    #[tokio::test]
+    async fn mark_articles_starred_skips_nonexistent_pks() {
+        let db = test_db().await;
+        let valid_pk = seed_article(&db).await;
+        let nonexistent_pk = valid_pk + 1000;
+
+        mark_articles_starred(&db, &[valid_pk, nonexistent_pk], true)
+            .await
+            .unwrap();
+
+        let state = sqlx::query_scalar!(
+            "SELECT is_starred FROM article_state WHERE article = ?",
+            valid_pk
+        )
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+        assert_eq!(state, 1);
+    }
+
+    #[tokio::test]
+    async fn mark_articles_starred_dedups_repeated_pk() {
+        let db = test_db().await;
+        let valid_pk = seed_article(&db).await;
+
+        mark_articles_starred(&db, &[valid_pk, valid_pk], true)
+            .await
+            .unwrap();
+
+        let state = sqlx::query_scalar!(
+            "SELECT is_starred FROM article_state WHERE article = ?",
+            valid_pk
+        )
+        .fetch_one(&db.read)
+        .await
+        .unwrap();
+        assert_eq!(state, 1);
+    }
 }

@@ -9,13 +9,17 @@ pub fn parse_item_id(raw: &str) -> Result<i64, GReaderError> {
             .map_err(|_| err());
     }
 
+    if let Ok(v) = raw.parse::<i64>() {
+        return Ok(v);
+    }
+
     if raw.len() == 16 && raw.chars().all(|c| c.is_ascii_hexdigit()) {
         return u64::from_str_radix(raw, 16)
             .map(|v| v as i64)
             .map_err(|_| err());
     }
 
-    raw.parse::<i64>().map_err(|_| err())
+    Err(err())
 }
 
 pub fn format_item_id_long(pk: i64) -> String {
@@ -49,5 +53,10 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         assert!(parse_item_id("not-an-id").is_err());
+    }
+
+    #[test]
+    fn sixteen_digit_decimal_is_not_misparsed_as_hex() {
+        assert_eq!(parse_item_id("1234567890123456").unwrap(), 1234567890123456);
     }
 }
