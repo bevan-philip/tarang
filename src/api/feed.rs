@@ -61,9 +61,9 @@ pub async fn post_feed(
         &http,
         &payload.url,
         FeedOptions {
-            name: payload.name.as_deref(),
+            name: payload.name,
             category: payload.category_id,
-            metadata: payload.metadata.as_deref(),
+            metadata: payload.metadata,
             refresh_interval: payload.refresh_interval,
             greader_hidden: payload.greader_hidden.unwrap_or(false),
         },

@@ -143,7 +143,7 @@ pub async fn subscription_edit(
                 &http,
                 &url,
                 FeedOptions {
-                    name: title.as_deref(),
+                    name: title,
                     category: category_pk,
                     ..Default::default()
                 },

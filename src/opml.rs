@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::database::{Category, Feed};
 
+#[derive(PartialEq, Eq, Hash)]
 pub struct ImportedFeed {
     pub name: String,
     pub url: String,

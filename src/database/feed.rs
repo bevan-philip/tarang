@@ -22,11 +22,11 @@ pub async fn create_feed(
     name: &str,
     url: &str,
     category: Option<i64>,
-    metadata: Option<&str>,
+    metadata: Option<String>,
     refresh_interval: Option<i64>,
     greader_hidden: bool,
 ) -> DbResult<Feed> {
-    let metadata = metadata.unwrap_or("{}");
+    let metadata = metadata.unwrap_or_else(|| "{}".to_string());
     let refresh_interval = refresh_interval.unwrap_or(3600);
 
     let feed = sqlx::query_as!(

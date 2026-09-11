@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::database;
 use crate::database::Article;
 use crate::database::Db;
@@ -33,10 +35,10 @@ pub async fn update_feed_articles(
 }
 
 #[derive(Default)]
-pub struct FeedOptions<'a> {
-    pub name: Option<&'a str>,
+pub struct FeedOptions {
+    pub name: Option<String>,
     pub category: Option<i64>,
-    pub metadata: Option<&'a str>,
+    pub metadata: Option<String>,
     pub refresh_interval: Option<i64>,
     pub greader_hidden: bool,
 }
@@ -45,12 +47,11 @@ pub async fn create_feed_with_articles(
     db: &Db,
     http: &reqwest::Client,
     url: &str,
-    options: FeedOptions<'_>,
+    options: FeedOptions,
 ) -> FeedResult<database::Feed> {
     let (parsed_title, articles) = get_feed_articles(http, url).await?;
     let name = options
         .name
-        .map(str::to_owned)
         .or(parsed_title)
         .unwrap_or_else(|| url.to_string());
 
@@ -70,11 +71,23 @@ pub async fn create_feed_with_articles(
     Ok(feed)
 }
 
+pub async fn bulk_feeds(
+    http: &reqwest::Client,
+    feeds: Vec<crate::opml::ImportedFeed>,
+) -> Result<HashMap<crate::opml::ImportedFeed, (Option<String>, Vec<ParsedArticle>)>, FeedError> {
+    let results =
+        futures::future::try_join_all(feeds.iter().map(|feed| get_feed_articles(http, &feed.url)))
+            .await?;
+    Ok(feeds.into_iter().zip(results).collect())
+}
+
 pub async fn import_opml_feeds(
     db: &Db,
     http: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
 ) -> FeedResult<()> {
+    let bulk_fetch = bulk_feeds(http, feeds).await?;
+
     let mut category_map: std::collections::HashMap<String, i64> =
         database::list_categories(db, database::FeedScope::All)
             .await?
@@ -82,8 +95,8 @@ pub async fn import_opml_feeds(
             .map(|c| (c.name, c.pk))
             .collect();
 
-    for feed in feeds {
-        let category_pk = match feed.category.as_deref() {
+    for feed in bulk_fetch {
+        let category_pk = match feed.0.category.as_deref() {
             None => None,
             Some(name) => match category_map.get(name) {
                 Some(pk) => Some(*pk),
@@ -96,17 +109,18 @@ pub async fn import_opml_feeds(
             },
         };
 
-        create_feed_with_articles(
+        let db_feed = database::create_feed(
             db,
-            http,
-            &feed.url,
-            FeedOptions {
-                name: Some(&feed.name),
-                category: category_pk,
-                ..Default::default()
-            },
+            &feed.0.name,
+            &feed.0.url,
+            category_pk,
+            None,
+            None,
+            false,
         )
         .await?;
+        let filters = filter::load_compiled_filters(db).await?;
+        database::create_articles(db, db_feed.pk, &feed.1.1, &filters).await?;
     }
 
     Ok(())
@@ -463,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn import_opml_feeds_fails_hard_on_first_bad_feed() {
+    async fn import_opml_feeds_imports_nothing_if_any_feed_fails() {
         let db = test_db().await;
         let (base, server) = spawn_test_server().await;
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -484,11 +498,13 @@ mod tests {
         let result = import_opml_feeds(&db, &client, feeds).await;
         assert!(result.is_err());
 
+        // Feeds are fetched concurrently up front via bulk_feeds, which
+        // fails fast: one bad feed means the DB write loop never runs, so
+        // even the good feed is left unpersisted.
         let db_feeds = database::list_feeds(&db, database::FeedScope::All)
             .await
             .unwrap();
-        assert_eq!(db_feeds.len(), 1);
-        assert_eq!(db_feeds[0].name, "Good");
+        assert_eq!(db_feeds.len(), 0);
 
         server.abort();
     }
