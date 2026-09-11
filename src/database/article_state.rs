@@ -317,6 +317,7 @@ mod tests {
             db,
             "Feed",
             "https://example.com/feed",
+            "",
             None,
             None,
             None,

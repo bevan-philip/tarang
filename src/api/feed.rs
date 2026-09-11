@@ -88,6 +88,7 @@ pub async fn delete_feed(
 #[derive(Deserialize, JsonSchema)]
 pub struct PatchFeedReq {
     name: Option<String>,
+    display_url: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
     greader_hidden: Option<bool>,
@@ -105,6 +106,7 @@ pub async fn patch_feed(
         &db,
         id,
         payload.name.as_deref(),
+        payload.display_url.as_deref(),
         payload.metadata.as_deref(),
         payload.refresh_interval,
         payload.category_id,

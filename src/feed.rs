@@ -28,7 +28,7 @@ pub async fn update_feed_articles(
     client: &reqwest::Client,
     filters: &[CompiledFilter],
 ) -> FeedResult<Vec<Article>> {
-    let (_title, articles) = get_feed_articles(client, feed_url).await?;
+    let (_title, _link, articles) = get_feed_articles(client, feed_url).await?;
     let db_entries = database::create_articles(db, feed_pk, &articles, filters).await?;
 
     Ok(db_entries)
@@ -49,16 +49,18 @@ pub async fn create_feed_with_articles(
     url: &str,
     options: FeedOptions,
 ) -> FeedResult<database::Feed> {
-    let (parsed_title, articles) = get_feed_articles(http, url).await?;
+    let (parsed_title, parsed_link, articles) = get_feed_articles(http, url).await?;
     let name = options
         .name
         .or(parsed_title)
         .unwrap_or_else(|| url.to_string());
+    let display_url = parsed_link.unwrap_or_default();
 
     let feed = database::create_feed(
         db,
         &name,
         url,
+        &display_url,
         options.category,
         options.metadata,
         options.refresh_interval,
@@ -74,7 +76,10 @@ pub async fn create_feed_with_articles(
 pub async fn bulk_feeds(
     http: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
-) -> Result<HashMap<crate::opml::ImportedFeed, (Option<String>, Vec<ParsedArticle>)>, FeedError> {
+) -> Result<
+    HashMap<crate::opml::ImportedFeed, (Option<String>, Option<String>, Vec<ParsedArticle>)>,
+    FeedError,
+> {
     let results =
         futures::future::try_join_all(feeds.iter().map(|feed| get_feed_articles(http, &feed.url)))
             .await?;
@@ -95,8 +100,8 @@ pub async fn import_opml_feeds(
             .map(|c| (c.name, c.pk))
             .collect();
 
-    for feed in bulk_fetch {
-        let category_pk = match feed.0.category.as_deref() {
+    for (imported, (_title, parsed_link, articles)) in bulk_fetch {
+        let category_pk = match imported.category.as_deref() {
             None => None,
             Some(name) => match category_map.get(name) {
                 Some(pk) => Some(*pk),
@@ -109,10 +114,13 @@ pub async fn import_opml_feeds(
             },
         };
 
+        let display_url = imported.display_url.or(parsed_link).unwrap_or_default();
+
         let db_feed = database::create_feed(
             db,
-            &feed.0.name,
-            &feed.0.url,
+            &imported.name,
+            &imported.url,
+            &display_url,
             category_pk,
             None,
             None,
@@ -120,7 +128,7 @@ pub async fn import_opml_feeds(
         )
         .await?;
         let filters = filter::load_compiled_filters(db).await?;
-        database::create_articles(db, db_feed.pk, &feed.1.1, &filters).await?;
+        database::create_articles(db, db_feed.pk, &articles, &filters).await?;
     }
 
     Ok(())
@@ -134,6 +142,7 @@ pub enum SkipReason {
 
 pub struct ParsedFeedResult {
     pub title: Option<String>,
+    pub link: Option<String>,
     pub articles: Vec<ParsedArticle>,
     pub skipped: Vec<SkipReason>,
 }
@@ -146,9 +155,11 @@ pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
         .build()
         .parse(bytes)?;
     let title = feed.title.as_ref().map(|t| t.content.clone());
+    let link = feed.links.first().map(|l| l.href.clone());
     let (articles, skipped) = process_feed(feed);
     Ok(ParsedFeedResult {
         title,
+        link,
         articles,
         skipped,
     })
@@ -157,10 +168,11 @@ pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
 pub async fn get_feed_articles(
     client: &reqwest::Client,
     feed_url: &str,
-) -> Result<(Option<String>, Vec<ParsedArticle>), FeedError> {
+) -> Result<(Option<String>, Option<String>, Vec<ParsedArticle>), FeedError> {
     let res = client.get(feed_url).send().await?.text().await?;
     let ParsedFeedResult {
         title,
+        link,
         articles,
         skipped,
     } = parse_feed(res.as_bytes())?;
@@ -174,7 +186,7 @@ pub async fn get_feed_articles(
             }
         }
     }
-    Ok((title, articles))
+    Ok((title, link, articles))
 }
 
 fn process_feed(feed: ParsedFeed) -> (Vec<ParsedArticle>, Vec<SkipReason>) {
@@ -420,11 +432,13 @@ mod tests {
             crate::opml::ImportedFeed {
                 name: "One".to_string(),
                 url: format!("{base}/one"),
+                display_url: None,
                 category: Some("News".to_string()),
             },
             crate::opml::ImportedFeed {
                 name: "Two".to_string(),
                 url: format!("{base}/two"),
+                display_url: None,
                 category: Some("Tech".to_string()),
             },
         ];
@@ -456,11 +470,13 @@ mod tests {
             crate::opml::ImportedFeed {
                 name: "One".to_string(),
                 url: format!("{base}/one"),
+                display_url: None,
                 category: Some("Same".to_string()),
             },
             crate::opml::ImportedFeed {
                 name: "Two".to_string(),
                 url: format!("{base}/two"),
+                display_url: None,
                 category: Some("Same".to_string()),
             },
         ];
@@ -486,11 +502,13 @@ mod tests {
             crate::opml::ImportedFeed {
                 name: "Good".to_string(),
                 url: format!("{base}/one"),
+                display_url: None,
                 category: None,
             },
             crate::opml::ImportedFeed {
                 name: "Bad".to_string(),
                 url: "http://127.0.0.1:1/unreachable".to_string(),
+                display_url: None,
                 category: None,
             },
         ];

@@ -8,6 +8,7 @@ use crate::database::{Category, Feed};
 pub struct ImportedFeed {
     pub name: String,
     pub url: String,
+    pub display_url: Option<String>,
     pub category: Option<String>,
 }
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +25,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
     Some(ImportedFeed {
         name,
         url,
+        display_url: outline.html_url,
         category,
     })
 }
@@ -67,6 +69,7 @@ pub fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlResult<St
             text: feed.name.clone(),
             title: Some(feed.name),
             xml_url: Some(feed.url),
+            html_url: (!feed.display_url.is_empty()).then_some(feed.display_url),
             r#type: Some(String::from("rss")),
             ..Default::default()
         };
@@ -84,6 +87,7 @@ pub fn export_opml(feeds: Vec<Feed>, categories: Vec<Category>) -> OpmlResult<St
                 text: feed.name.clone(),
                 title: Some(feed.name),
                 xml_url: Some(feed.url),
+                html_url: (!feed.display_url.is_empty()).then_some(feed.display_url),
                 r#type: Some(String::from("rss")),
                 ..Default::default()
             };
@@ -185,11 +189,52 @@ mod tests {
         assert_eq!(feeds[0].category, Some("News".to_string()));
     }
 
+    #[test]
+    fn import_reads_html_url() {
+        let opml = r#"<?xml version="1.0"?>
+<opml version="2.0">
+  <head><title>Test</title></head>
+  <body>
+    <outline text="Feed One" title="Feed One" type="rss" xmlUrl="https://example.com/one.xml" htmlUrl="https://example.com/one"/>
+    <outline text="Feed Two" title="Feed Two" type="rss" xmlUrl="https://example.com/two.xml"/>
+  </body>
+</opml>"#;
+
+        let feeds = parse_opml(opml).unwrap();
+        assert_eq!(
+            feeds
+                .iter()
+                .find(|f| f.url.ends_with("one.xml"))
+                .unwrap()
+                .display_url,
+            Some("https://example.com/one".to_string())
+        );
+        assert_eq!(
+            feeds
+                .iter()
+                .find(|f| f.url.ends_with("two.xml"))
+                .unwrap()
+                .display_url,
+            None
+        );
+    }
+
     fn make_feed(pk: i64, name: &str, url: &str, category: Option<i64>) -> Feed {
+        make_feed_with_display_url(pk, name, url, "", category)
+    }
+
+    fn make_feed_with_display_url(
+        pk: i64,
+        name: &str,
+        url: &str,
+        display_url: &str,
+        category: Option<i64>,
+    ) -> Feed {
         Feed {
             pk,
             name: name.to_string(),
             url: url.to_string(),
+            display_url: display_url.to_string(),
             category,
             metadata: String::new(),
             refresh_interval: 0,
@@ -219,6 +264,7 @@ mod tests {
             .unwrap();
         assert!(one.outlines.is_empty());
         assert_eq!(one.xml_url, Some("https://example.com/one.xml".to_string()));
+        assert_eq!(one.html_url, None);
 
         let two = parsed
             .body
@@ -228,6 +274,25 @@ mod tests {
             .unwrap();
         assert!(two.outlines.is_empty());
         assert_eq!(two.xml_url, Some("https://example.com/two.xml".to_string()));
+    }
+
+    #[test]
+    fn export_writes_html_url_when_set() {
+        let feeds = vec![make_feed_with_display_url(
+            1,
+            "Feed One",
+            "https://example.com/one.xml",
+            "https://example.com/one",
+            None,
+        )];
+
+        let xml = export_opml(feeds, vec![]).unwrap();
+        let parsed = OPML::from_str(&xml).unwrap();
+
+        assert_eq!(
+            parsed.body.outlines[0].html_url,
+            Some("https://example.com/one".to_string())
+        );
     }
 
     #[test]

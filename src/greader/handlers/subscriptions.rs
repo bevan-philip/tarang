@@ -64,8 +64,8 @@ pub async fn subscription_list(
                 id: StreamId::Feed(FeedRef::Pk(feed.pk)).to_string(),
                 title: feed.name,
                 categories,
-                url: feed.url.clone(),
-                html_url: feed.url,
+                url: feed.url,
+                html_url: feed.display_url,
                 icon_url: String::new(),
             }
         })
@@ -183,7 +183,17 @@ pub async fn subscription_edit(
             };
 
             if title.is_some() || new_category.is_some() {
-                update_feed(&db, pk, title.as_deref(), None, None, new_category, None).await?;
+                update_feed(
+                    &db,
+                    pk,
+                    title.as_deref(),
+                    None,
+                    None,
+                    None,
+                    new_category,
+                    None,
+                )
+                .await?;
             }
         }
     }
