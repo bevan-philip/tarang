@@ -73,6 +73,31 @@ pub enum CategoryChangeIntent {
     RemoveIfCurrent(String),
 }
 
+/// Resolves what a feed's `category` column should become given an edit
+/// intent and its current value. Returns `None` for "leave unchanged" and
+/// `Some(new_value)` otherwise, mirroring `update_feed`'s own
+/// `Option<Option<i64>>` convention for an optional nullable field.
+/// `label_lookup` is the caller-resolved pk for the intent's label: the
+/// freshly created/fetched pk for `Add`, the result of a name lookup for
+/// `RemoveIfCurrent` (or `None` if no such category exists), and unused for
+/// `None`.
+pub fn resolve_category_change(
+    category_change: &CategoryChangeIntent,
+    current_category: Option<i64>,
+    label_lookup: Option<i64>,
+) -> Option<Option<i64>> {
+    match category_change {
+        CategoryChangeIntent::Add(_) => {
+            Some(Some(label_lookup.expect("caller resolves pk for Add")))
+        }
+        CategoryChangeIntent::RemoveIfCurrent(_) => match label_lookup {
+            Some(pk) if current_category == Some(pk) => Some(None),
+            _ => None,
+        },
+        CategoryChangeIntent::None => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionEditCommand {
     Subscribe {
@@ -247,6 +272,44 @@ mod tests {
         assert_eq!(
             dedupe_single_label(&labels).unwrap(),
             Some("news".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_add_uses_resolved_pk() {
+        let intent = CategoryChangeIntent::Add("News".to_string());
+        assert_eq!(
+            resolve_category_change(&intent, None, Some(5)),
+            Some(Some(5))
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_matches_clears() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(
+            resolve_category_change(&intent, Some(5), Some(5)),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_does_not_match_is_noop() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(resolve_category_change(&intent, Some(7), Some(5)), None);
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_label_missing_is_noop() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(resolve_category_change(&intent, Some(5), None), None);
+    }
+
+    #[test]
+    fn resolve_category_change_none_is_noop() {
+        assert_eq!(
+            resolve_category_change(&CategoryChangeIntent::None, Some(5), None),
+            None
         );
     }
 

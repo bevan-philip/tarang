@@ -171,18 +171,17 @@ pub async fn subscription_edit(
                 .await?
                 .ok_or_else(|| GReaderError::BadRequest(format!("feed {pk} not found")))?;
 
-            let new_category = match category_change {
+            let label_lookup = match &category_change {
                 CategoryChangeIntent::Add(label) => {
-                    Some(Some(get_or_create_category_pk(&db, &label).await?))
+                    Some(get_or_create_category_pk(&db, label).await?)
                 }
                 CategoryChangeIntent::RemoveIfCurrent(label) => {
-                    match get_category_by_name(&db, &label).await? {
-                        Some(c) if feed.category == Some(c.pk) => Some(None),
-                        _ => None,
-                    }
+                    get_category_by_name(&db, label).await?.map(|c| c.pk)
                 }
                 CategoryChangeIntent::None => None,
             };
+            let new_category =
+                commands::resolve_category_change(&category_change, feed.category, label_lookup);
 
             if title.is_some() || new_category.is_some() {
                 update_feed(
