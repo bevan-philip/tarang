@@ -242,9 +242,9 @@ mod tests {
     async fn unlimited_starred_previews_support_article_navigation() {
         let state = test_state().await;
         sqlx::raw_sql(
-            "INSERT INTO feed (pk, name, url, greader_hidden) VALUES
-                (1, 'Visible feed', 'https://example.com/feed', 0),
-                (2, 'Hidden feed', 'https://example.com/hidden', 1);
+            "INSERT INTO feed (pk, name, url, display_url, greader_hidden) VALUES
+                (1, 'Visible feed', 'https://example.com/feed', '', 0),
+                (2, 'Hidden feed', 'https://example.com/hidden', '', 1);
              INSERT INTO filter (pk, name, match_type, pattern)
                 VALUES (1, 'Blocked', 'contains', 'Article');",
         )

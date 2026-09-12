@@ -60,12 +60,14 @@ pub async fn subscription_list(
                 })
                 .unwrap_or_default();
 
+            let html_url = feed.html_url().to_string();
+
             Subscription {
                 id: StreamId::Feed(FeedRef::Pk(feed.pk)).to_string(),
                 title: feed.name,
                 categories,
+                html_url,
                 url: feed.url,
-                html_url: feed.display_url,
                 icon_url: String::new(),
             }
         })

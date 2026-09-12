@@ -18,6 +18,19 @@ pub struct Feed {
     pub greader_hidden: bool,
 }
 
+impl Feed {
+    /// The URL to show as the feed's human-facing site link, falling back
+    /// to the feed's own URL when no display URL is on file (e.g. the feed
+    /// had no `<link>` at parse time).
+    pub fn html_url(&self) -> &str {
+        if self.display_url.is_empty() {
+            &self.url
+        } else {
+            &self.display_url
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_feed(
     db: &Db,
@@ -186,6 +199,33 @@ mod tests {
             read: pool.clone(),
             write: pool,
         }
+    }
+
+    fn make_feed(url: &str, display_url: &str) -> Feed {
+        Feed {
+            pk: 1,
+            name: "Feed".to_string(),
+            url: url.to_string(),
+            display_url: display_url.to_string(),
+            category: None,
+            metadata: "{}".to_string(),
+            refresh_interval: 3600,
+            last_refresh: None,
+            next_poll_at: None,
+            greader_hidden: false,
+        }
+    }
+
+    #[test]
+    fn html_url_falls_back_to_url_when_display_url_empty() {
+        let feed = make_feed("https://example.com/feed.xml", "");
+        assert_eq!(feed.html_url(), "https://example.com/feed.xml");
+    }
+
+    #[test]
+    fn html_url_prefers_display_url_when_present() {
+        let feed = make_feed("https://example.com/feed.xml", "https://example.com/site");
+        assert_eq!(feed.html_url(), "https://example.com/site");
     }
 
     #[tokio::test]

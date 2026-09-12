@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT is_starred FROM article_state WHERE article = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_starred",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "article_state",
+            "name": "is_starred"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9addd4f180fbeda94131228f3777a896d0d914af67fe4fca07b6f054edc58959"
+}

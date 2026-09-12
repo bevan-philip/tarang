@@ -147,6 +147,18 @@ pub struct ParsedFeedResult {
     pub skipped: Vec<SkipReason>,
 }
 
+// feed-rs defaults an Atom <link>'s rel to "alternate" only when the XML
+// omits the attribute (parser/atom/mod.rs), and RSS2 links always get
+// rel: None - so this reliably picks the human-facing site link over a
+// "self" link pointing back at the feed's own XML.
+fn select_display_link(links: &[feed_rs::model::Link]) -> Option<String> {
+    links
+        .iter()
+        .find(|l| matches!(l.rel.as_deref(), None | Some("alternate")))
+        .or_else(|| links.first())
+        .map(|l| l.href.clone())
+}
+
 pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
     let feed = parser::Builder::new()
         .id_generator(|links, _title, _uri| {
@@ -155,7 +167,7 @@ pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
         .build()
         .parse(bytes)?;
     let title = feed.title.as_ref().map(|t| t.content.clone());
-    let link = feed.links.first().map(|l| l.href.clone());
+    let link = select_display_link(&feed.links);
     let (articles, skipped) = process_feed(feed);
     Ok(ParsedFeedResult {
         title,
@@ -339,6 +351,17 @@ mod tests {
         assert_eq!(result.articles.len(), 1);
         assert_eq!(result.articles[0].guid, "https://example.com/first");
         assert_eq!(result.articles[0].url, "https://example.com/first");
+    }
+
+    #[test]
+    fn atom_feed_prefers_alternate_link_over_self() {
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Feed</title>
+            <link rel="self" href="https://example.com/feed.xml"/>
+            <link rel="alternate" href="https://example.com/site"/>
+        </feed>"#;
+        let result = parse_feed(xml.as_bytes()).unwrap();
+        assert_eq!(result.link.as_deref(), Some("https://example.com/site"));
     }
 
     #[test]
