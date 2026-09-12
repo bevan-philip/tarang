@@ -25,7 +25,7 @@ fn outline_to_feed(outline: opml::Outline, category: Option<String>) -> Option<I
     Some(ImportedFeed {
         name,
         url,
-        display_url: outline.html_url,
+        display_url: outline.html_url.filter(|u| !u.is_empty()),
         category,
     })
 }
@@ -217,6 +217,20 @@ mod tests {
                 .display_url,
             None
         );
+    }
+
+    #[test]
+    fn import_treats_empty_html_url_as_absent() {
+        let opml = r#"<?xml version="1.0"?>
+<opml version="2.0">
+  <head><title>Test</title></head>
+  <body>
+    <outline text="Feed" title="Feed" type="rss" xmlUrl="https://example.com/feed.xml" htmlUrl=""/>
+  </body>
+</opml>"#;
+
+        let feeds = parse_opml(opml).unwrap();
+        assert_eq!(feeds[0].display_url, None);
     }
 
     fn make_feed(pk: i64, name: &str, url: &str, category: Option<i64>) -> Feed {

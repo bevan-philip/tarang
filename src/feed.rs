@@ -15,6 +15,8 @@ pub enum FeedError {
     Fetch(#[from] reqwest::Error),
     #[error("failed to parse feed: {0}")]
     Parse(#[from] feed_rs::parser::ParseFeedError),
+    #[error("feed has no link to its website")]
+    MissingLink,
     #[error(transparent)]
     Db(#[from] DbError),
 }
@@ -28,7 +30,7 @@ pub async fn update_feed_articles(
     client: &reqwest::Client,
     filters: &[CompiledFilter],
 ) -> FeedResult<Vec<Article>> {
-    let (_title, _link, articles) = get_feed_articles(client, feed_url).await?;
+    let (_title, _display_url, articles) = get_feed_articles(client, feed_url).await?;
     let db_entries = database::create_articles(db, feed_pk, &articles, filters).await?;
 
     Ok(db_entries)
@@ -49,12 +51,11 @@ pub async fn create_feed_with_articles(
     url: &str,
     options: FeedOptions,
 ) -> FeedResult<database::Feed> {
-    let (parsed_title, parsed_link, articles) = get_feed_articles(http, url).await?;
+    let (parsed_title, display_url, articles) = get_feed_articles(http, url).await?;
     let name = options
         .name
         .or(parsed_title)
         .unwrap_or_else(|| url.to_string());
-    let display_url = parsed_link.unwrap_or_default();
 
     let feed = database::create_feed(
         db,
@@ -77,7 +78,7 @@ pub async fn bulk_feeds(
     http: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
 ) -> Result<
-    HashMap<crate::opml::ImportedFeed, (Option<String>, Option<String>, Vec<ParsedArticle>)>,
+    HashMap<crate::opml::ImportedFeed, (Option<String>, String, Vec<ParsedArticle>)>,
     FeedError,
 > {
     let results =
@@ -114,7 +115,7 @@ pub async fn import_opml_feeds(
             },
         };
 
-        let display_url = imported.display_url.or(parsed_link).unwrap_or_default();
+        let display_url = imported.display_url.unwrap_or(parsed_link);
 
         let db_feed = database::create_feed(
             db,
@@ -142,7 +143,7 @@ pub enum SkipReason {
 
 pub struct ParsedFeedResult {
     pub title: Option<String>,
-    pub link: Option<String>,
+    pub link: String,
     pub articles: Vec<ParsedArticle>,
     pub skipped: Vec<SkipReason>,
 }
@@ -159,15 +160,19 @@ fn select_display_link(links: &[feed_rs::model::Link]) -> Option<String> {
         .map(|l| l.href.clone())
 }
 
-pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
+// RSS 1.0/2.0 require a channel-level <link>, and Atom strongly recommends
+// an alternate <link>; a feed with neither is treated as malformed rather
+// than silently degraded.
+pub fn parse_feed(bytes: &[u8], base_uri: &str) -> Result<ParsedFeedResult, FeedError> {
     let feed = parser::Builder::new()
+        .base_uri(Some(base_uri))
         .id_generator(|links, _title, _uri| {
             links.first().map(|l| l.href.clone()).unwrap_or_default()
         })
         .build()
         .parse(bytes)?;
     let title = feed.title.as_ref().map(|t| t.content.clone());
-    let link = select_display_link(&feed.links);
+    let link = select_display_link(&feed.links).ok_or(FeedError::MissingLink)?;
     let (articles, skipped) = process_feed(feed);
     Ok(ParsedFeedResult {
         title,
@@ -180,14 +185,14 @@ pub fn parse_feed(bytes: &[u8]) -> Result<ParsedFeedResult, FeedError> {
 pub async fn get_feed_articles(
     client: &reqwest::Client,
     feed_url: &str,
-) -> Result<(Option<String>, Option<String>, Vec<ParsedArticle>), FeedError> {
+) -> Result<(Option<String>, String, Vec<ParsedArticle>), FeedError> {
     let res = client.get(feed_url).send().await?.text().await?;
     let ParsedFeedResult {
         title,
         link,
         articles,
         skipped,
-    } = parse_feed(res.as_bytes())?;
+    } = parse_feed(res.as_bytes(), feed_url)?;
     for reason in skipped {
         match reason {
             SkipReason::NoLink { entry_id } => {
@@ -250,8 +255,11 @@ fn create_parsed_article(entry: Entry) -> Result<ParsedArticle, SkipReason> {
 mod tests {
     use super::*;
 
+    const BASE_URI: &str = "https://example.com/feed.xml";
+
     const RSS_HAPPY_PATH: &str = r#"<rss version="2.0"><channel>
         <title>RSS Feed</title>
+        <link>https://example.com</link>
         <item>
             <title>Item One</title>
             <link>https://example.com/one</link>
@@ -262,6 +270,7 @@ mod tests {
 
     const ATOM_HAPPY_PATH: &str = r#"<feed xmlns="http://www.w3.org/2005/Atom">
         <title>Atom Feed</title>
+        <link href="https://example.com"/>
         <entry>
             <id>urn:test:one</id>
             <title>Entry One</title>
@@ -273,7 +282,7 @@ mod tests {
 
     #[test]
     fn rss_happy_path_extracts_title_and_articles() {
-        let result = parse_feed(RSS_HAPPY_PATH.as_bytes()).unwrap();
+        let result = parse_feed(RSS_HAPPY_PATH.as_bytes(), BASE_URI).unwrap();
         assert_eq!(result.title.as_deref(), Some("RSS Feed"));
         assert_eq!(result.articles.len(), 1);
         assert!(result.skipped.is_empty());
@@ -285,7 +294,7 @@ mod tests {
 
     #[test]
     fn atom_happy_path_extracts_title_and_articles() {
-        let result = parse_feed(ATOM_HAPPY_PATH.as_bytes()).unwrap();
+        let result = parse_feed(ATOM_HAPPY_PATH.as_bytes(), BASE_URI).unwrap();
         assert_eq!(result.title.as_deref(), Some("Atom Feed"));
         assert_eq!(result.articles.len(), 1);
         assert!(result.skipped.is_empty());
@@ -301,12 +310,13 @@ mod tests {
     fn entry_with_no_link_is_skipped() {
         let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
             <title>Feed</title>
+            <link href="https://example.com"/>
             <entry>
                 <id>urn:test:no-link</id>
                 <updated>2026-01-01T00:00:00Z</updated>
             </entry>
         </feed>"#;
-        let result = parse_feed(xml.as_bytes()).unwrap();
+        let result = parse_feed(xml.as_bytes(), BASE_URI).unwrap();
         assert!(result.articles.is_empty());
         assert_eq!(
             result.skipped,
@@ -320,12 +330,13 @@ mod tests {
     fn entry_with_no_date_is_skipped() {
         let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
             <title>Feed</title>
+            <link href="https://example.com"/>
             <entry>
                 <id>urn:test:no-date</id>
                 <link href="https://example.com/no-date"/>
             </entry>
         </feed>"#;
-        let result = parse_feed(xml.as_bytes()).unwrap();
+        let result = parse_feed(xml.as_bytes(), BASE_URI).unwrap();
         assert!(result.articles.is_empty());
         assert_eq!(
             result.skipped,
@@ -341,13 +352,14 @@ mod tests {
         // kicks in - this is what proves it survived the extraction.
         let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
             <title>Feed</title>
+            <link href="https://example.com"/>
             <entry>
                 <link href="https://example.com/first"/>
                 <link href="https://example.com/second"/>
                 <updated>2026-01-01T00:00:00Z</updated>
             </entry>
         </feed>"#;
-        let result = parse_feed(xml.as_bytes()).unwrap();
+        let result = parse_feed(xml.as_bytes(), BASE_URI).unwrap();
         assert_eq!(result.articles.len(), 1);
         assert_eq!(result.articles[0].guid, "https://example.com/first");
         assert_eq!(result.articles[0].url, "https://example.com/first");
@@ -360,14 +372,34 @@ mod tests {
             <link rel="self" href="https://example.com/feed.xml"/>
             <link rel="alternate" href="https://example.com/site"/>
         </feed>"#;
-        let result = parse_feed(xml.as_bytes()).unwrap();
-        assert_eq!(result.link.as_deref(), Some("https://example.com/site"));
+        let result = parse_feed(xml.as_bytes(), BASE_URI).unwrap();
+        assert_eq!(result.link, "https://example.com/site");
+    }
+
+    #[test]
+    fn feed_with_no_links_is_a_parse_error() {
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Feed</title>
+        </feed>"#;
+        let result = parse_feed(xml.as_bytes(), BASE_URI);
+        assert!(matches!(result, Err(FeedError::MissingLink)));
+    }
+
+    #[test]
+    fn relative_link_is_resolved_against_base_uri() {
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Feed</title>
+            <link rel="alternate" href="../"/>
+        </feed>"#;
+        let result = parse_feed(xml.as_bytes(), "https://example.com/feed/atom.xml").unwrap();
+        assert_eq!(result.link, "https://example.com/");
     }
 
     #[test]
     fn content_falls_back_to_summary_then_empty() {
         let with_summary = r#"<feed xmlns="http://www.w3.org/2005/Atom">
             <title>Feed</title>
+            <link href="https://example.com"/>
             <entry>
                 <id>urn:test:summary-only</id>
                 <link href="https://example.com/summary-only"/>
@@ -375,7 +407,7 @@ mod tests {
                 <summary>Just a summary</summary>
             </entry>
         </feed>"#;
-        let result = parse_feed(with_summary.as_bytes()).unwrap();
+        let result = parse_feed(with_summary.as_bytes(), BASE_URI).unwrap();
         assert_eq!(result.articles[0].content, "Just a summary");
         assert_eq!(
             result.articles[0].summary.as_deref(),
@@ -384,20 +416,21 @@ mod tests {
 
         let with_neither = r#"<feed xmlns="http://www.w3.org/2005/Atom">
             <title>Feed</title>
+            <link href="https://example.com"/>
             <entry>
                 <id>urn:test:neither</id>
                 <link href="https://example.com/neither"/>
                 <updated>2026-01-01T00:00:00Z</updated>
             </entry>
         </feed>"#;
-        let result = parse_feed(with_neither.as_bytes()).unwrap();
+        let result = parse_feed(with_neither.as_bytes(), BASE_URI).unwrap();
         assert_eq!(result.articles[0].content, "");
         assert_eq!(result.articles[0].summary, None);
     }
 
     #[test]
     fn invalid_bytes_return_parse_error() {
-        let result = parse_feed(b"not a feed at all");
+        let result = parse_feed(b"not a feed at all", BASE_URI);
         assert!(matches!(result, Err(FeedError::Parse(_))));
     }
 
@@ -418,6 +451,7 @@ mod tests {
         format!(
             r#"<rss version="2.0"><channel>
                 <title>Feed</title>
+                <link>https://example.com</link>
                 <item>
                     <title>Item</title>
                     <link>{link}</link>

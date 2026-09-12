@@ -80,6 +80,7 @@ mod tests {
             get(|| async {
                 r#"<rss version="2.0"><channel>
                     <title>Feed</title>
+                    <link>https://example.com</link>
                     <item>
                         <title>Item</title>
                         <link>https://example.com/item</link>

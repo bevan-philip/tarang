@@ -160,10 +160,10 @@ mod tests {
                 r#"<rss version="2.0"><channel><title>RSS title</title><link>https://example.com</link><description>Test</description></channel></rss>"#
             }))
             .route("/atom", get(|| async {
-                r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom title</title><id>urn:test:feed</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom title</title><link href="https://example.com"/><id>urn:test:feed</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
             }))
             .route("/untitled", get(|| async {
-                r#"<feed xmlns="http://www.w3.org/2005/Atom"><id>urn:test:untitled</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><link href="https://example.com"/><id>urn:test:untitled</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
             }))
             .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
