@@ -99,6 +99,7 @@ mod tests {
             &state.db,
             "Feed",
             "https://example.com/feed",
+            "",
             None,
             None,
             None,

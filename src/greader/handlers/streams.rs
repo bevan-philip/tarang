@@ -170,7 +170,7 @@ fn build_contents_response(
                         .map(|f| StreamId::Feed(FeedRef::Pk(f.pk)).to_string())
                         .unwrap_or_default(),
                     title: feed.map(|f| f.name.clone()).unwrap_or_default(),
-                    html_url: feed.map(|f| f.url.clone()).unwrap_or_default(),
+                    html_url: feed.map(|f| f.html_url().to_string()).unwrap_or_default(),
                 },
             }
         })

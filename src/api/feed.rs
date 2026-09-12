@@ -88,6 +88,7 @@ pub async fn delete_feed(
 #[derive(Deserialize, JsonSchema)]
 pub struct PatchFeedReq {
     name: Option<String>,
+    display_url: Option<String>,
     metadata: Option<String>,
     refresh_interval: Option<i64>,
     greader_hidden: Option<bool>,
@@ -105,6 +106,7 @@ pub async fn patch_feed(
         &db,
         id,
         payload.name.as_deref(),
+        payload.display_url.as_deref(),
         payload.metadata.as_deref(),
         payload.refresh_interval,
         payload.category_id,
@@ -158,10 +160,10 @@ mod tests {
                 r#"<rss version="2.0"><channel><title>RSS title</title><link>https://example.com</link><description>Test</description></channel></rss>"#
             }))
             .route("/atom", get(|| async {
-                r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom title</title><id>urn:test:feed</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom title</title><link href="https://example.com"/><id>urn:test:feed</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
             }))
             .route("/untitled", get(|| async {
-                r#"<feed xmlns="http://www.w3.org/2005/Atom"><id>urn:test:untitled</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
+                r#"<feed xmlns="http://www.w3.org/2005/Atom"><link href="https://example.com"/><id>urn:test:untitled</id><updated>2026-01-01T00:00:00Z</updated></feed>"#
             }))
             .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -240,9 +242,9 @@ mod tests {
     async fn unlimited_starred_previews_support_article_navigation() {
         let state = test_state().await;
         sqlx::raw_sql(
-            "INSERT INTO feed (pk, name, url, greader_hidden) VALUES
-                (1, 'Visible feed', 'https://example.com/feed', 0),
-                (2, 'Hidden feed', 'https://example.com/hidden', 1);
+            "INSERT INTO feed (pk, name, url, display_url, greader_hidden) VALUES
+                (1, 'Visible feed', 'https://example.com/feed', '', 0),
+                (2, 'Hidden feed', 'https://example.com/hidden', '', 1);
              INSERT INTO filter (pk, name, match_type, pattern)
                 VALUES (1, 'Blocked', 'contains', 'Article');",
         )

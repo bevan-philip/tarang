@@ -176,9 +176,9 @@ mod tests {
 
     async fn seed_feeds_and_matching_articles(state: &AppState) {
         sqlx::raw_sql(
-            "INSERT INTO feed (pk, name, url, greader_hidden) VALUES
-                (1, 'Feed A', 'https://example.com/a', 0),
-                (2, 'Feed B', 'https://example.com/b', 0);",
+            "INSERT INTO feed (pk, name, url, display_url, greader_hidden) VALUES
+                (1, 'Feed A', 'https://example.com/a', '', 0),
+                (2, 'Feed B', 'https://example.com/b', '', 0);",
         )
         .execute(&state.db.write)
         .await

@@ -80,6 +80,7 @@ mod tests {
             get(|| async {
                 r#"<rss version="2.0"><channel>
                     <title>Feed</title>
+                    <link>https://example.com</link>
                     <item>
                         <title>Item</title>
                         <link>https://example.com/item</link>
@@ -104,6 +105,7 @@ mod tests {
             &db,
             "Good",
             &format!("{base}/good"),
+            "",
             None,
             None,
             None,
@@ -133,6 +135,7 @@ mod tests {
             &db,
             "Good",
             &format!("{base}/good"),
+            "",
             None,
             None,
             None,
@@ -144,6 +147,7 @@ mod tests {
             &db,
             "Bad",
             "http://127.0.0.1:1/unreachable",
+            "",
             None,
             None,
             None,
@@ -176,6 +180,7 @@ mod tests {
             &db,
             "Future",
             &format!("{base}/good"),
+            "",
             None,
             None,
             None,
