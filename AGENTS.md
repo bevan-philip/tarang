@@ -5,6 +5,7 @@
 - This project aims to follow the Functional Core, Imperative Shell pattern of Boundaries by Gary Bernhardt.
 - The code aims to be relatively simple.
 - Avoid writing documentation unless explicitly instructed.
+- Errors are considered acceptable modes of operation. We do not need to have pretty handling for every scenario.
 
 ## Ensure
 - We run build & test before committing.
