@@ -94,6 +94,11 @@ mod tests {
     #[tokio::test]
     async fn get_category_by_name_missing_returns_none() {
         let db = test_db().await;
-        assert!(get_category_by_name(&db, "Missing").await.unwrap().is_none());
+        assert!(
+            get_category_by_name(&db, "Missing")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

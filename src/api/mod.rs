@@ -6,7 +6,7 @@ use axum::{
 };
 use std::str::Utf8Error;
 
-use crate::{database::DbError, feed::FeedError, opml::OpmlError};
+use crate::{database::DbError, discovery::DiscoveryError, feed::FeedError, opml::OpmlError};
 
 mod article;
 mod category;
@@ -30,6 +30,8 @@ pub enum AppError {
     Db(#[from] DbError),
     #[error(transparent)]
     Feed(#[from] FeedError),
+    #[error(transparent)]
+    Discovery(#[from] DiscoveryError),
     #[error(transparent)]
     Upload(#[from] MultipartError),
     #[error(transparent)]
@@ -60,6 +62,10 @@ impl IntoResponse for AppError {
                 (StatusCode::CONFLICT, msg.clone())
             }
             AppError::InvalidFilterPattern(_) => {
+                tracing::warn!(error = %self, "request rejected");
+                (StatusCode::BAD_REQUEST, self.to_string())
+            }
+            AppError::Discovery(_) => {
                 tracing::warn!(error = %self, "request rejected");
                 (StatusCode::BAD_REQUEST, self.to_string())
             }

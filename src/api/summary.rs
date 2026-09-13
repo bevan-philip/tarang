@@ -79,6 +79,7 @@ mod tests {
                 write: pool,
             },
             http: reqwest::Client::new(),
+            discovery: Default::default(),
         }
     }
 

@@ -21,6 +21,7 @@ pub mod api;
 pub mod backup;
 pub mod config;
 pub mod database;
+pub mod discovery;
 pub mod feed;
 pub mod filter;
 pub mod greader;
@@ -31,6 +32,7 @@ pub mod sync;
 pub struct AppState {
     pub db: Db,
     pub http: reqwest::Client,
+    pub discovery: config::DiscoveryConfig,
 }
 
 pub fn build_app(state: AppState) -> Router {

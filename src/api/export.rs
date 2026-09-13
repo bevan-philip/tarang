@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub async fn upload_opml(
-    State(AppState { db, http }): State<AppState>,
+    State(AppState { db, http, .. }): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<StatusCode, AppError> {
     while let Some(field) = multipart.next_field().await? {
@@ -60,6 +60,7 @@ mod tests {
                 write: pool,
             },
             http: reqwest::Client::new(),
+            discovery: Default::default(),
         }
     }
 

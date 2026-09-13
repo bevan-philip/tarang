@@ -23,6 +23,7 @@ pub struct Config {
     pub http: HttpConfig,
     pub sync: SyncConfig,
     pub backup: BackupConfig,
+    pub discovery: DiscoveryConfig,
 }
 
 impl Config {
@@ -157,6 +158,14 @@ impl Default for BackupConfig {
     }
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct DiscoveryConfig {
+    /// When resolving a YouTube channel, point at the uploads playlist that
+    /// excludes Shorts (UULF...) instead of the default all-uploads feed.
+    pub youtube_exclude_shorts: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +178,19 @@ mod tests {
         assert_eq!(config.http.timeout_secs, 30);
         assert_eq!(config.sync.poll_interval_secs, 300);
         assert!(!config.backup.enabled);
+        assert!(!config.discovery.youtube_exclude_shorts);
+    }
+
+    #[test]
+    fn discovery_partial_override_only_changes_specified_fields() {
+        let config = Config::from_toml_str(
+            r#"
+            [discovery]
+            youtube_exclude_shorts = true
+            "#,
+        )
+        .unwrap();
+        assert!(config.discovery.youtube_exclude_shorts);
     }
 
     #[test]
