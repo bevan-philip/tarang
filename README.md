@@ -13,5 +13,5 @@ A headless RSS reader.
 cargo install sqlx-cli --no-default-features --features rustls,sqlite
 cargo sqlx database create
 cargo sqlx migrate run
-cargo sqlx prepare
+cargo sqlx prepare --workspace -- --all-targets
 ```

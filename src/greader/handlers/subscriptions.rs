@@ -171,18 +171,17 @@ pub async fn subscription_edit(
                 .await?
                 .ok_or_else(|| GReaderError::BadRequest(format!("feed {pk} not found")))?;
 
-            let new_category = match category_change {
+            let label_lookup = match &category_change {
                 CategoryChangeIntent::Add(label) => {
-                    Some(Some(get_or_create_category_pk(&db, &label).await?))
+                    Some(get_or_create_category_pk(&db, label).await?)
                 }
                 CategoryChangeIntent::RemoveIfCurrent(label) => {
-                    match get_category_by_name(&db, &label).await? {
-                        Some(c) if feed.category == Some(c.pk) => Some(None),
-                        _ => None,
-                    }
+                    get_category_by_name(&db, label).await?.map(|c| c.pk)
                 }
                 CategoryChangeIntent::None => None,
             };
+            let new_category =
+                commands::resolve_category_change(&category_change, feed.category, label_lookup);
 
             if title.is_some() || new_category.is_some() {
                 update_feed(
@@ -245,4 +244,289 @@ pub async fn disable_tag(
     }
 
     Ok("OK")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_state() -> AppState {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        AppState {
+            db: Db {
+                read: pool.clone(),
+                write: pool,
+            },
+            http: reqwest::Client::builder().no_proxy().build().unwrap(),
+        }
+    }
+
+    async fn spawn_test_feed_server() -> (String, tokio::task::JoinHandle<()>) {
+        use axum::{Router, routing::get};
+
+        let app = Router::new().route(
+            "/feed",
+            get(|| async {
+                r#"<rss version="2.0"><channel>
+                    <title>Feed</title>
+                    <link>https://example.com</link>
+                    <item>
+                        <title>Item</title>
+                        <link>https://example.com/item</link>
+                        <pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate>
+                    </item>
+                </channel></rss>"#
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, server)
+    }
+
+    #[tokio::test]
+    async fn tag_list_includes_starred_and_category_folders() {
+        let state = test_state().await;
+        let category = create_category(&state.db, "News").await.unwrap();
+        // GReaderVisible scope only surfaces categories with a visible feed.
+        crate::database::create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            Some(category.pk),
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let Json(resp) = tag_list(State(state.clone())).await.unwrap();
+        assert!(resp.tags.iter().any(|t| t.id == StreamId::Starred.to_string()));
+        assert!(resp.tags.iter().any(|t| {
+            t.id == StreamId::Label("News".to_string()).to_string()
+                && t.kind.as_deref() == Some("folder")
+        }));
+    }
+
+    #[tokio::test]
+    async fn subscription_list_includes_feed_with_category() {
+        let state = test_state().await;
+        let category = create_category(&state.db, "News").await.unwrap();
+        let feed = crate::database::create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            Some(category.pk),
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let Json(resp) = subscription_list(State(state.clone())).await.unwrap();
+        assert_eq!(resp.subscriptions.len(), 1);
+        let sub = &resp.subscriptions[0];
+        assert_eq!(sub.id, StreamId::Feed(FeedRef::Pk(feed.pk)).to_string());
+        assert_eq!(sub.categories.len(), 1);
+        assert_eq!(sub.categories[0].label, "News");
+    }
+
+    #[tokio::test]
+    async fn subscription_quickadd_creates_feed() {
+        let state = test_state().await;
+        let (base, server) = spawn_test_feed_server().await;
+
+        let query = format!("quickadd={base}/feed");
+        let params = MergedParams::from_query(&query);
+        let Json(resp) = subscription_quickadd(State(state.clone()), params)
+            .await
+            .unwrap();
+        assert_eq!(resp.num_results, 1);
+        assert_eq!(resp.stream_name, "Feed");
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn subscription_quickadd_already_subscribed_falls_back_to_lookup() {
+        let state = test_state().await;
+        let (base, server) = spawn_test_feed_server().await;
+        let url = format!("{base}/feed");
+
+        crate::feed::create_feed_with_articles(
+            &state.db,
+            &state.http,
+            &url,
+            crate::feed::FeedOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        let query = format!("quickadd={url}");
+        let params = MergedParams::from_query(&query);
+        let Json(resp) = subscription_quickadd(State(state.clone()), params)
+            .await
+            .unwrap();
+        assert_eq!(resp.num_results, 1);
+        assert_eq!(resp.stream_name, "Feed");
+
+        let feeds = crate::database::list_feeds(&state.db, crate::database::FeedScope::All)
+            .await
+            .unwrap();
+        assert_eq!(feeds.len(), 1, "the conflicting create must not duplicate the feed");
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn subscription_edit_subscribe_creates_feed() {
+        let state = test_state().await;
+        let (base, server) = spawn_test_feed_server().await;
+        let url = format!("{base}/feed");
+
+        let query = format!("ac=subscribe&s=feed/{url}");
+        let params = MergedParams::from_query(&query);
+        subscription_edit(State(state.clone()), params)
+            .await
+            .unwrap();
+
+        let feeds = crate::database::list_feeds(&state.db, crate::database::FeedScope::All)
+            .await
+            .unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].url, url);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn subscription_edit_unsubscribe_drops_feed() {
+        let state = test_state().await;
+        let feed = crate::database::create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let query = format!("ac=unsubscribe&s=feed/{}", feed.pk);
+        let params = MergedParams::from_query(&query);
+        subscription_edit(State(state.clone()), params)
+            .await
+            .unwrap();
+
+        let found = list_feed(&state.db, feed.pk).await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn subscription_edit_title_only_updates_title() {
+        let state = test_state().await;
+        let feed = crate::database::create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let query = format!("ac=edit&s=feed/{}&t=New+Title", feed.pk);
+        let params = MergedParams::from_query(&query);
+        subscription_edit(State(state.clone()), params)
+            .await
+            .unwrap();
+
+        let updated = list_feed(&state.db, feed.pk).await.unwrap().unwrap();
+        assert_eq!(updated.name, "New Title");
+    }
+
+    #[tokio::test]
+    async fn subscription_edit_category_change_moves_feed() {
+        let state = test_state().await;
+        let feed = crate::database::create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let query = format!("ac=edit&s=feed/{}&a=user/-/label/News", feed.pk);
+        let params = MergedParams::from_query(&query);
+        subscription_edit(State(state.clone()), params)
+            .await
+            .unwrap();
+
+        let updated = list_feed(&state.db, feed.pk).await.unwrap().unwrap();
+        let category = get_category_by_name(&state.db, "News")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.category, Some(category.pk));
+    }
+
+    #[tokio::test]
+    async fn rename_tag_renames_category() {
+        let state = test_state().await;
+        create_category(&state.db, "News").await.unwrap();
+
+        let query = "s=user/-/label/News&dest=user/-/label/Tech";
+        let params = MergedParams::from_query(query);
+        rename_tag(State(state.clone()), params).await.unwrap();
+
+        assert!(
+            get_category_by_name(&state.db, "News")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            get_category_by_name(&state.db, "Tech")
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn disable_tag_drops_category() {
+        let state = test_state().await;
+        create_category(&state.db, "News").await.unwrap();
+
+        let query = "s=user/-/label/News";
+        let params = MergedParams::from_query(query);
+        disable_tag(State(state.clone()), params).await.unwrap();
+
+        assert!(
+            get_category_by_name(&state.db, "News")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
 }

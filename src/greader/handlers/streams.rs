@@ -402,4 +402,208 @@ mod tests {
         assert!(q.ascending);
         assert!(q.unread_only);
     }
+
+    fn make_article(
+        pk: i64,
+        feed: i64,
+        published_at: Option<i64>,
+        is_starred: bool,
+    ) -> ArticleWithState {
+        ArticleWithState {
+            pk,
+            feed,
+            url: format!("https://example.com/{pk}"),
+            guid: format!("guid-{pk}"),
+            title: Some(format!("Title {pk}")),
+            content: "content".to_string(),
+            summary: None,
+            published_at,
+            retrieved_at: 0,
+            is_read: false,
+            is_starred,
+        }
+    }
+
+    fn make_feed(pk: i64, category: Option<i64>) -> Feed {
+        Feed {
+            pk,
+            name: format!("Feed {pk}"),
+            url: format!("https://example.com/feed/{pk}"),
+            display_url: String::new(),
+            category,
+            metadata: "{}".to_string(),
+            refresh_interval: 3600,
+            last_refresh: None,
+            next_poll_at: None,
+            greader_hidden: false,
+        }
+    }
+
+    #[test]
+    fn build_contents_response_empty_articles() {
+        let response = build_contents_response(
+            "stream-id".to_string(),
+            vec![],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        assert_eq!(response.id, "stream-id");
+        assert_eq!(response.updated, 0);
+        assert!(response.items.is_empty());
+        assert_eq!(response.continuation, None);
+    }
+
+    #[test]
+    fn build_contents_response_starred_adds_starred_category() {
+        let article = make_article(1, 10, Some(100), true);
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        assert!(
+            response.items[0]
+                .categories
+                .contains(&StreamId::Starred.to_string())
+        );
+    }
+
+    #[test]
+    fn build_contents_response_non_starred_has_no_starred_category() {
+        let article = make_article(1, 10, Some(100), false);
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        assert!(
+            !response.items[0]
+                .categories
+                .contains(&StreamId::Starred.to_string())
+        );
+    }
+
+    #[test]
+    fn build_contents_response_feed_with_category_adds_label() {
+        let article = make_article(1, 10, Some(100), false);
+        let mut category_names_by_feed = HashMap::new();
+        category_names_by_feed.insert(10, "News".to_string());
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &HashMap::new(),
+            &category_names_by_feed,
+            None,
+        );
+        assert!(
+            response.items[0]
+                .categories
+                .contains(&StreamId::Label("News".to_string()).to_string())
+        );
+    }
+
+    #[test]
+    fn build_contents_response_feed_without_category_has_no_label() {
+        let article = make_article(1, 10, Some(100), false);
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        assert_eq!(response.items[0].categories.len(), 1);
+        assert_eq!(
+            response.items[0].categories[0],
+            StreamId::ReadingList.to_string()
+        );
+    }
+
+    #[test]
+    fn build_contents_response_missing_feed_pk_falls_back_to_empty_origin() {
+        let article = make_article(1, 999, Some(100), false);
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        let origin = &response.items[0].origin;
+        assert_eq!(origin.stream_id, "");
+        assert_eq!(origin.title, "");
+        assert_eq!(origin.html_url, "");
+    }
+
+    #[test]
+    fn build_contents_response_present_feed_pk_populates_origin() {
+        let article = make_article(1, 10, Some(100), false);
+        let mut feeds_by_pk = HashMap::new();
+        feeds_by_pk.insert(10, make_feed(10, None));
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![article],
+            &feeds_by_pk,
+            &HashMap::new(),
+            None,
+        );
+        let origin = &response.items[0].origin;
+        assert_eq!(
+            origin.stream_id,
+            StreamId::Feed(FeedRef::Pk(10)).to_string()
+        );
+        assert_eq!(origin.title, "Feed 10");
+    }
+
+    #[test]
+    fn build_contents_response_continuation_passthrough() {
+        let response = build_contents_response(
+            "id".to_string(),
+            vec![],
+            &HashMap::new(),
+            &HashMap::new(),
+            Some("cursor-123".to_string()),
+        );
+        assert_eq!(response.continuation, Some("cursor-123".to_string()));
+    }
+
+    #[test]
+    fn build_contents_response_updated_is_max_published_at() {
+        let articles = vec![
+            make_article(1, 10, Some(100), false),
+            make_article(2, 10, Some(300), false),
+            make_article(3, 10, Some(200), false),
+        ];
+        let response = build_contents_response(
+            "id".to_string(),
+            articles,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
+        assert_eq!(response.updated, 300);
+    }
+
+    #[test]
+    fn percent_decode_segment_plain_string() {
+        assert_eq!(percent_decode_segment("hello"), "hello");
+    }
+
+    #[test]
+    fn percent_decode_segment_decodes_percent_encoding() {
+        assert_eq!(
+            percent_decode_segment("user%2F-%2Flabel%2FNews"),
+            "user/-/label/News"
+        );
+    }
+
+    #[test]
+    fn percent_decode_segment_empty_input() {
+        assert_eq!(percent_decode_segment(""), "");
+    }
 }

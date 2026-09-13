@@ -73,6 +73,23 @@ pub enum CategoryChangeIntent {
     RemoveIfCurrent(String),
 }
 
+pub fn resolve_category_change(
+    category_change: &CategoryChangeIntent,
+    current_category: Option<i64>,
+    label_lookup: Option<i64>,
+) -> Option<Option<i64>> {
+    match category_change {
+        CategoryChangeIntent::Add(_) => {
+            Some(Some(label_lookup.expect("caller resolves pk for Add")))
+        }
+        CategoryChangeIntent::RemoveIfCurrent(_) => match label_lookup {
+            Some(pk) if current_category == Some(pk) => Some(None),
+            _ => None,
+        },
+        CategoryChangeIntent::None => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionEditCommand {
     Subscribe {
@@ -247,6 +264,44 @@ mod tests {
         assert_eq!(
             dedupe_single_label(&labels).unwrap(),
             Some("news".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_add_uses_resolved_pk() {
+        let intent = CategoryChangeIntent::Add("News".to_string());
+        assert_eq!(
+            resolve_category_change(&intent, None, Some(5)),
+            Some(Some(5))
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_matches_clears() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(
+            resolve_category_change(&intent, Some(5), Some(5)),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_does_not_match_is_noop() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(resolve_category_change(&intent, Some(7), Some(5)), None);
+    }
+
+    #[test]
+    fn resolve_category_change_remove_if_current_label_missing_is_noop() {
+        let intent = CategoryChangeIntent::RemoveIfCurrent("News".to_string());
+        assert_eq!(resolve_category_change(&intent, Some(5), None), None);
+    }
+
+    #[test]
+    fn resolve_category_change_none_is_noop() {
+        assert_eq!(
+            resolve_category_change(&CategoryChangeIntent::None, Some(5), None),
+            None
         );
     }
 

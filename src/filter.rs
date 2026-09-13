@@ -439,4 +439,67 @@ mod tests {
         let articles = vec![fake_article(1, 10, "crypto news", "")];
         assert!(compute_filter_matches(&articles, &[]).is_empty());
     }
+
+    #[test]
+    fn compile_filter_field_title_row() {
+        let row = filter_row_with_field("title", "contains", "spam");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert_eq!(compiled.field, FilterField::Title);
+        assert!(matches(&compiled, "spam alert", "harmless"));
+        assert!(!matches(&compiled, "harmless", "spam in body"));
+    }
+
+    #[test]
+    fn compile_filter_field_content_row() {
+        let row = filter_row_with_field("content", "contains", "spam");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert_eq!(compiled.field, FilterField::Content);
+        assert!(!matches(&compiled, "spam alert", "harmless"));
+        assert!(matches(&compiled, "harmless", "spam in body"));
+    }
+
+    #[test]
+    fn compile_filter_unrecognized_field_defaults_to_both() {
+        let row = filter_row_with_field("bogus", "contains", "spam");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert_eq!(compiled.field, FilterField::Both);
+        assert!(matches(&compiled, "spam alert", "harmless"));
+        assert!(matches(&compiled, "harmless", "spam in body"));
+    }
+
+    #[test]
+    fn compile_filter_contains_match_type_is_case_insensitive() {
+        let row = filter_row_with_field("both", "contains", "SPAM");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert!(matches!(compiled.matcher, CompiledMatcher::Contains(_)));
+        assert!(matches(&compiled, "a spam alert", ""));
+    }
+
+    #[test]
+    fn matches_text_regex_arm_for_title_field() {
+        let row = filter_row_with_field("title", "regex", r"^\d+$");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert!(matches(&compiled, "12345", "irrelevant"));
+        assert!(!matches(&compiled, "not digits", "12345"));
+    }
+
+    #[test]
+    fn matches_text_regex_arm_for_content_field() {
+        let row = filter_row_with_field("content", "regex", r"^\d+$");
+        let compiled = compile_filter(&row, None).unwrap();
+        assert!(!matches(&compiled, "12345", "irrelevant"));
+        assert!(matches(&compiled, "irrelevant", "12345"));
+    }
+
+    fn filter_row_with_field(field: &str, match_type: &str, pattern: &str) -> database::Filter {
+        database::Filter {
+            pk: 1,
+            name: "test".to_string(),
+            field: field.to_string(),
+            match_type: match_type.to_string(),
+            pattern: pattern.to_string(),
+            enabled: true,
+            created_at: 0,
+        }
+    }
 }

@@ -93,3 +93,36 @@ pub async fn config(db_path: &str, busy_timeout: Duration) -> DbResult<Db> {
 
     Ok(Db { read, write })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn config_runs_migrations_and_read_pool_is_read_only() {
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!("tarang-database-config-{pid}.db"));
+        let _ = std::fs::remove_file(&path);
+
+        let db = config(path.to_str().unwrap(), Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        // A known table from migrations must be queryable.
+        sqlx::query("SELECT * FROM feed")
+            .fetch_all(&db.read)
+            .await
+            .unwrap();
+
+        // The read pool must reject writes.
+        let write_result = sqlx::query("INSERT INTO category (name) VALUES ('nope')")
+            .execute(&db.read)
+            .await;
+        assert!(write_result.is_err());
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    }
+}
