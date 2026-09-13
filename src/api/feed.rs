@@ -13,6 +13,7 @@ use crate::{
         ArticlePreview, DbError, Feed, StarredArticlePreview, drop_feed,
         list_article_previews_for_feed, list_feed, list_starred_articles_with_feed, update_feed,
     },
+    discovery::resolve_feed_url,
     feed::{FeedOptions, create_feed_with_articles},
 };
 
@@ -43,6 +44,10 @@ pub struct PostFeedReq {
     pub metadata: Option<String>,
     pub refresh_interval: Option<i64>,
     pub greader_hidden: Option<bool>,
+    /// Whether to treat `url` as a page to discover a feed from (e.g. a
+    /// YouTube channel or Bluesky profile) rather than a literal feed URL.
+    /// Defaults to true.
+    pub discovery: Option<bool>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -53,13 +58,23 @@ pub struct PostFeedResp {
 }
 
 pub async fn post_feed(
-    State(AppState { db, http }): State<AppState>,
+    State(AppState {
+        db,
+        http,
+        discovery,
+    }): State<AppState>,
     Json(payload): Json<PostFeedReq>,
 ) -> Result<Json<PostFeedResp>, AppError> {
+    let url = if payload.discovery.unwrap_or(true) {
+        resolve_feed_url(&http, &discovery, &payload.url).await?
+    } else {
+        payload.url.clone()
+    };
+
     let feed = create_feed_with_articles(
         &db,
         &http,
-        &payload.url,
+        &url,
         FeedOptions {
             name: payload.name,
             category: payload.category_id,
@@ -143,6 +158,7 @@ mod tests {
                 write: pool,
             },
             http: reqwest::Client::new(),
+            discovery: Default::default(),
         }
     }
 
@@ -225,6 +241,175 @@ mod tests {
         let types = schema["properties"]["name"]["type"].as_array().unwrap();
         assert!(types.contains(&serde_json::json!("string")));
         assert!(types.contains(&serde_json::json!("null")));
+    }
+
+    #[test]
+    fn discovery_schema_is_optional_and_nullable() {
+        let schema = serde_json::to_value(schemars::schema_for!(PostFeedReq)).unwrap();
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.contains(&serde_json::json!("discovery")));
+        let types = schema["properties"]["discovery"]["type"]
+            .as_array()
+            .unwrap();
+        assert!(types.contains(&serde_json::json!("boolean")));
+        assert!(types.contains(&serde_json::json!("null")));
+    }
+
+    async fn discovery_test_app(state: AppState) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::{Router, routing::post};
+
+        let app = Router::new()
+            .route("/feed", post(post_feed))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, server)
+    }
+
+    async fn rss_page() -> &'static str {
+        r#"<rss version="2.0"><channel><title>RSS title</title><link>https://example.com</link></channel></rss>"#
+    }
+
+    async fn html_with_alternate_link() -> &'static str {
+        r#"<html><head>
+            <link rel="alternate" type="application/rss+xml" href="/feed.xml">
+        </head></html>"#
+    }
+
+    async fn html_without_a_feed() -> &'static str {
+        "<html><head></head></html>"
+    }
+
+    #[tokio::test]
+    async fn discovery_defaults_true_and_no_ops_on_an_already_valid_feed() {
+        use axum::routing::get;
+
+        let state = test_state().await;
+        let (base, server) = discovery_test_app(state.clone()).await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        // Re-route a feed server on the same app instance isn't possible
+        // since discovery_test_app only mounts /feed, so spawn a second
+        // fixture server to be the URL being posted.
+        let feed_app = axum::Router::new().route("/feed.xml", get(rss_page));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let feed_base = format!("http://{}", listener.local_addr().unwrap());
+        let feed_server =
+            tokio::spawn(async move { axum::serve(listener, feed_app).await.unwrap() });
+
+        let feed_url = format!("{feed_base}/feed.xml");
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": feed_url}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&response.text().await.unwrap()).unwrap();
+        let saved = list_feed(&state.db, body["id"].as_i64().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.url, feed_url);
+
+        server.abort();
+        feed_server.abort();
+    }
+
+    #[tokio::test]
+    async fn discovery_resolves_a_generic_alternate_link_page() {
+        use axum::routing::get;
+
+        let state = test_state().await;
+        let (base, server) = discovery_test_app(state.clone()).await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let page_app = axum::Router::new()
+            .route("/page", get(html_with_alternate_link))
+            .route("/feed.xml", get(rss_page));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let page_base = format!("http://{}", listener.local_addr().unwrap());
+        let page_server =
+            tokio::spawn(async move { axum::serve(listener, page_app).await.unwrap() });
+
+        let page_url = format!("{page_base}/page");
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": page_url}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&response.text().await.unwrap()).unwrap();
+        let saved = list_feed(&state.db, body["id"].as_i64().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.url, format!("{page_base}/feed.xml"));
+
+        server.abort();
+        page_server.abort();
+    }
+
+    #[tokio::test]
+    async fn discovery_false_is_a_true_no_op_and_fails_like_today() {
+        use axum::routing::get;
+
+        let state = test_state().await;
+        let (base, server) = discovery_test_app(state.clone()).await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let page_app = axum::Router::new().route("/page", get(html_with_alternate_link));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let page_base = format!("http://{}", listener.local_addr().unwrap());
+        let page_server =
+            tokio::spawn(async move { axum::serve(listener, page_app).await.unwrap() });
+
+        let page_url = format!("{page_base}/page");
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": page_url, "discovery": false}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        server.abort();
+        page_server.abort();
+    }
+
+    #[tokio::test]
+    async fn discovery_400_when_nothing_is_discoverable() {
+        use axum::routing::get;
+
+        let state = test_state().await;
+        let (base, server) = discovery_test_app(state.clone()).await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let page_app = axum::Router::new().route("/page", get(html_without_a_feed));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let page_base = format!("http://{}", listener.local_addr().unwrap());
+        let page_server =
+            tokio::spawn(async move { axum::serve(listener, page_app).await.unwrap() });
+
+        let page_url = format!("{page_base}/page");
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": page_url}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        server.abort();
+        page_server.abort();
     }
 
     #[tokio::test]

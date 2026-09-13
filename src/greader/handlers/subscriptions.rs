@@ -77,7 +77,7 @@ pub async fn subscription_list(
 }
 
 pub async fn subscription_quickadd(
-    State(AppState { db, http }): State<AppState>,
+    State(AppState { db, http, .. }): State<AppState>,
     params: MergedParams,
 ) -> Result<Json<QuickAddResponse>, GReaderError> {
     let url = params
@@ -111,7 +111,7 @@ async fn get_or_create_category_pk(db: &Db, label: &str) -> Result<i64, GReaderE
 }
 
 pub async fn subscription_edit(
-    State(AppState { db, http }): State<AppState>,
+    State(AppState { db, http, .. }): State<AppState>,
     params: MergedParams,
 ) -> Result<&'static str, GReaderError> {
     let action = params
@@ -263,6 +263,7 @@ mod tests {
                 write: pool,
             },
             http: reqwest::Client::builder().no_proxy().build().unwrap(),
+            discovery: Default::default(),
         }
     }
 
@@ -308,7 +309,11 @@ mod tests {
         .unwrap();
 
         let Json(resp) = tag_list(State(state.clone())).await.unwrap();
-        assert!(resp.tags.iter().any(|t| t.id == StreamId::Starred.to_string()));
+        assert!(
+            resp.tags
+                .iter()
+                .any(|t| t.id == StreamId::Starred.to_string())
+        );
         assert!(resp.tags.iter().any(|t| {
             t.id == StreamId::Label("News".to_string()).to_string()
                 && t.kind.as_deref() == Some("folder")
@@ -382,7 +387,11 @@ mod tests {
         let feeds = crate::database::list_feeds(&state.db, crate::database::FeedScope::All)
             .await
             .unwrap();
-        assert_eq!(feeds.len(), 1, "the conflicting create must not duplicate the feed");
+        assert_eq!(
+            feeds.len(),
+            1,
+            "the conflicting create must not duplicate the feed"
+        );
 
         server.abort();
     }

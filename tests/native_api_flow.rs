@@ -17,6 +17,7 @@ async fn spawn_app() -> (String, tokio::task::JoinHandle<()>) {
     let state = AppState {
         db: test_db().await,
         http: reqwest::Client::new(),
+        discovery: Default::default(),
     };
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

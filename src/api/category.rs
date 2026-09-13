@@ -78,6 +78,7 @@ mod tests {
                 write: pool,
             },
             http: reqwest::Client::new(),
+            discovery: Default::default(),
         }
     }
 
@@ -89,9 +90,10 @@ mod tests {
             .unwrap();
         assert_eq!(created.name, "News");
 
-        let categories = crate::database::list_categories(&state.db, crate::database::FeedScope::All)
-            .await
-            .unwrap();
+        let categories =
+            crate::database::list_categories(&state.db, crate::database::FeedScope::All)
+                .await
+                .unwrap();
         assert_eq!(categories.len(), 1);
         assert_eq!(categories[0].pk, created.id);
     }

@@ -57,7 +57,11 @@ async fn main() {
         }
     });
 
-    let app = build_app(AppState { db, http });
+    let app = build_app(AppState {
+        db,
+        http,
+        discovery: config.discovery,
+    });
 
     let bind_addr = config.server.bind_addr();
 
