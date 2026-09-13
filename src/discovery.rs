@@ -57,7 +57,7 @@ fn find_alternate_feed_link(html: &str, base: &Url) -> Option<String> {
         let value = link.value();
         let is_feed_type = matches!(
             value.attr("type"),
-            Some("application/rss+xml" | "application/atom+xml" | "application/json")
+            Some("application/rss+xml" | "application/atom+xml" | "application/feed+json")
         );
         if !is_feed_type {
             continue;
@@ -232,6 +232,27 @@ mod tests {
             find_alternate_feed_link(html, &base),
             Some("https://example.com/feed.xml".to_string())
         );
+    }
+
+    #[test]
+    fn alternate_link_matches_json_feed_type() {
+        let html = r#"<html><head>
+            <link rel="alternate" type="application/feed+json" href="/feed.json">
+        </head></html>"#;
+        let base = url("https://example.com/page");
+        assert_eq!(
+            find_alternate_feed_link(html, &base),
+            Some("https://example.com/feed.json".to_string())
+        );
+    }
+
+    #[test]
+    fn alternate_link_ignores_generic_json_type() {
+        let html = r#"<html><head>
+            <link rel="alternate" type="application/json" href="/data.json">
+        </head></html>"#;
+        let base = url("https://example.com/page");
+        assert_eq!(find_alternate_feed_link(html, &base), None);
     }
 
     #[test]
