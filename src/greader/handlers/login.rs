@@ -27,3 +27,29 @@ pub async fn user_info() -> Json<UserInfoResponse> {
         user_email: "tarang@localhost".to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[tokio::test]
+    async fn client_login_returns_token_body() {
+        let params = MergedParams::from_query("");
+        let response = client_login(params).await.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn token_returns_fixed_token() {
+        let response = token().await.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn user_info_returns_fixed_user() {
+        let Json(info) = user_info().await;
+        assert_eq!(info.user_id, "1");
+        assert_eq!(info.user_name, "tarang");
+    }
+}

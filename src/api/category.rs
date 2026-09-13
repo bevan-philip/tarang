@@ -59,3 +59,87 @@ pub async fn patch_category(
     let category = rename_category(&db, id, &payload.name).await?;
     Ok(Json(category))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Db;
+
+    async fn test_state() -> AppState {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        AppState {
+            db: Db {
+                read: pool.clone(),
+                write: pool,
+            },
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn post_category_creates_and_returns_it() {
+        let state = test_state().await;
+        let Json(created) = post_category(State(state.clone()), Path("News".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(created.name, "News");
+
+        let categories = crate::database::list_categories(&state.db, crate::database::FeedScope::All)
+            .await
+            .unwrap();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0].pk, created.id);
+    }
+
+    #[tokio::test]
+    async fn get_category_lists_all() {
+        let state = test_state().await;
+        post_category(State(state.clone()), Path("News".to_string()))
+            .await
+            .unwrap();
+
+        let Json(categories) = get_category(State(state.clone())).await.unwrap();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0].name, "News");
+    }
+
+    #[tokio::test]
+    async fn delete_category_removes_it() {
+        let state = test_state().await;
+        let Json(created) = post_category(State(state.clone()), Path("News".to_string()))
+            .await
+            .unwrap();
+
+        let status = delete_category(State(state.clone()), Path(created.id))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+
+        let Json(categories) = get_category(State(state.clone())).await.unwrap();
+        assert!(categories.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_category_renames_it() {
+        let state = test_state().await;
+        let Json(created) = post_category(State(state.clone()), Path("News".to_string()))
+            .await
+            .unwrap();
+
+        let Json(updated) = patch_category(
+            State(state.clone()),
+            Path(created.id),
+            Json(PatchCategoryReq {
+                name: "Tech".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.name, "Tech");
+    }
+}

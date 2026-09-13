@@ -218,4 +218,36 @@ mod tests {
 
         std::fs::remove_file(&path).unwrap();
     }
+
+    #[test]
+    fn server_config_bind_addr_formats_host_and_port() {
+        let config = ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+        };
+        assert_eq!(config.bind_addr(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn database_config_busy_timeout_converts_secs_to_duration() {
+        let config = DatabaseConfig {
+            path: "app.db".to_string(),
+            busy_timeout_secs: 5,
+        };
+        assert_eq!(config.busy_timeout(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn http_config_timeout_converts_secs_to_duration() {
+        let config = HttpConfig { timeout_secs: 30 };
+        assert_eq!(config.timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn sync_config_poll_interval_converts_secs_to_duration() {
+        let config = SyncConfig {
+            poll_interval_secs: 300,
+        };
+        assert_eq!(config.poll_interval(), Duration::from_secs(300));
+    }
 }

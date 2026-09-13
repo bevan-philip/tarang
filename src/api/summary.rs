@@ -59,3 +59,66 @@ pub async fn get_summary(
         feeds: feed_with_articles,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::{Db, ParsedArticle, create_articles, create_category, create_feed};
+    use chrono::Utc;
+
+    async fn test_state() -> AppState {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        AppState {
+            db: Db {
+                read: pool.clone(),
+                write: pool,
+            },
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_summary_groups_articles_under_their_feed() {
+        let state = test_state().await;
+        let category = create_category(&state.db, "News").await.unwrap();
+        let feed = create_feed(
+            &state.db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            Some(category.pk),
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        create_articles(
+            &state.db,
+            feed.pk,
+            &[ParsedArticle {
+                url: "https://example.com/article".into(),
+                guid: "guid-1".into(),
+                title: Some("Title".into()),
+                content: "content".into(),
+                summary: None,
+                published_at: Utc::now(),
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let Json(summary) = get_summary(State(state.clone())).await.unwrap();
+        assert_eq!(summary.categories.len(), 1);
+        assert_eq!(summary.feeds.len(), 1);
+        assert_eq!(summary.feeds[0].feed.pk, feed.pk);
+        assert_eq!(summary.feeds[0].category.as_ref().unwrap().pk, category.pk);
+        assert_eq!(summary.feeds[0].articles.len(), 1);
+    }
+}

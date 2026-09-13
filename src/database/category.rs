@@ -64,3 +64,36 @@ pub async fn drop_category(db: &Db, pk: i64) -> DbResult<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_db() -> Db {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        Db {
+            read: pool.clone(),
+            write: pool,
+        }
+    }
+
+    #[tokio::test]
+    async fn get_category_by_name_finds_existing() {
+        let db = test_db().await;
+        let created = create_category(&db, "News").await.unwrap();
+
+        let found = get_category_by_name(&db, "News").await.unwrap().unwrap();
+        assert_eq!(found.pk, created.pk);
+    }
+
+    #[tokio::test]
+    async fn get_category_by_name_missing_returns_none() {
+        let db = test_db().await;
+        assert!(get_category_by_name(&db, "Missing").await.unwrap().is_none());
+    }
+}
