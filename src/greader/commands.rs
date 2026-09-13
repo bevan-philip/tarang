@@ -73,14 +73,6 @@ pub enum CategoryChangeIntent {
     RemoveIfCurrent(String),
 }
 
-/// Resolves what a feed's `category` column should become given an edit
-/// intent and its current value. Returns `None` for "leave unchanged" and
-/// `Some(new_value)` otherwise, mirroring `update_feed`'s own
-/// `Option<Option<i64>>` convention for an optional nullable field.
-/// `label_lookup` is the caller-resolved pk for the intent's label: the
-/// freshly created/fetched pk for `Add`, the result of a name lookup for
-/// `RemoveIfCurrent` (or `None` if no such category exists), and unused for
-/// `None`.
 pub fn resolve_category_change(
     category_change: &CategoryChangeIntent,
     current_category: Option<i64>,
