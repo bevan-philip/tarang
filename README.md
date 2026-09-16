@@ -15,6 +15,8 @@ A headless RSS reader.
 ## Features
 - Minimal REST API for building stateless RSS applications.
 - GReader API shim for stateful/mobile applications, like NetNewsWire.
+- OPML import/export.
+- Filters (ask your agent to figure out what filter you want to make).
 
 ## Running stuff
 ### sqlx
