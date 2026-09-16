@@ -13,7 +13,7 @@ async fn main() {
         .await
         .expect("failed to initialise db");
 
-    let http = reqwest::Client::builder()
+    let http = tarang::http::client_builder()
         .timeout(config.http.timeout())
         .build()
         .expect("failed to build http client");

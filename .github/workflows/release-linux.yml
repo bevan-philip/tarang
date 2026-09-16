@@ -44,6 +44,8 @@ jobs:
           cargo sqlx migrate run
 
       - name: Build release binary
+        env:
+          TARANG_RELEASE_VERSION: ${{ inputs.tag }}
         run: cargo build --release --target aarch64-unknown-linux-musl
 
       - name: Package binary
