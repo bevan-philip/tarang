@@ -7,6 +7,15 @@ A headless RSS reader.
 - SQLite as the backing database.
 - Portable.
 
+## Why you shouldn't use it
+- It is designed for the author, not for anyone else.
+- There is no authentication layer, as I run it inside a [tailnet](https://tailscale.com/docs/concepts/tailnet).
+- There are many alternatives for a FOSS RSS server, like [miniflux](https://github.com/miniflux/v2) or [FreshRSS](https://www.freshrss.org/).
+
+## Features
+- Minimal REST API for building stateless RSS applications.
+- GReader API shim for stateful/mobile applications, like NetNewsWire.
+
 ## Running stuff
 ### sqlx
 ```bash
