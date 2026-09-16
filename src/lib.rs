@@ -25,6 +25,7 @@ pub mod discovery;
 pub mod feed;
 pub mod filter;
 pub mod greader;
+pub mod http;
 pub mod opml;
 pub mod sync;
 
