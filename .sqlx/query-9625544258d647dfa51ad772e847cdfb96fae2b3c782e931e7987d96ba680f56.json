@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to\n           FROM feed WHERE pk = ?",
+  "query": "INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days",
   "describe": {
     "columns": [
       {
@@ -189,30 +189,66 @@
             "name": "redirected_to"
           }
         }
+      },
+      {
+        "name": "ttl_secs",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "ttl_secs"
+          }
+        }
+      },
+      {
+        "name": "skip_hours",
+        "ordinal": 18,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_hours"
+          }
+        }
+      },
+      {
+        "name": "skip_days",
+        "ordinal": 19,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_days"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 7
     },
     "nullable": [
       false,
       false,
       false,
       false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
       true,
       false,
       false,
       true,
       true,
-      false,
       true,
       true,
       false,
-      false,
-      true,
-      true,
-      true
+      false
     ]
   },
-  "hash": "631aff5269378eb4c67a7b70b6c3918c910f7cbfcb50282ba6780fb84343c3f7"
+  "hash": "9625544258d647dfa51ad772e847cdfb96fae2b3c782e931e7987d96ba680f56"
 }

@@ -6,6 +6,8 @@ use crate::filter::{self, CompiledFilter};
 use crate::http;
 use crate::poll::{self, Outcome, Validators};
 use futures::stream::{self, StreamExt};
+use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,35 +19,64 @@ pub struct SyncSummary {
 pub async fn sync_feeds_at(db: &Db, client: &reqwest::Client, now: i64) -> DbResult<SyncSummary> {
     let feeds = list_feeds_due_for_refresh_at(db, now).await?;
     let filters = Arc::new(filter::load_compiled_filters(db).await?);
+    let addresses = resolve_hosts(&feeds).await;
 
-    let (succeeded, failed) = stream::iter(feeds)
-        .map(|feed| {
-            let filters = Arc::clone(&filters);
-            async move {
-                let result = poll_feed(db, client, &feed, &filters, now).await;
-                (feed, result)
-            }
-        })
-        .buffer_unordered(8)
-        .fold(
-            (0u32, 0u32),
-            |(succeeded, failed), (feed, res)| async move {
-                match res {
-                    Ok(None) => (succeeded + 1, failed),
-                    Ok(Some(error)) => {
-                        tracing::warn!(feed = feed.pk, url = %feed.url, error = %error, "feed poll failed");
-                        (succeeded, failed + 1)
+    // Feeds on one server are polled one after the other; servers in parallel.
+    let results: Vec<(Feed, DbResult<Option<String>>)> =
+        stream::iter(poll::group_by_server(feeds, &addresses))
+            .map(|group| {
+                let filters = Arc::clone(&filters);
+                async move {
+                    let mut results = Vec::with_capacity(group.len());
+                    for feed in group {
+                        let result = poll_feed(db, client, &feed, &filters, now).await;
+                        results.push((feed, result));
                     }
-                    Err(e) => {
-                        tracing::error!(feed = feed.pk, url = %feed.url, error = %e, "feed sync failed");
-                        (succeeded, failed + 1)
-                    }
+                    results
                 }
-            },
-        )
-        .await;
+            })
+            .buffer_unordered(8)
+            .flat_map(stream::iter)
+            .collect()
+            .await;
+
+    let (mut succeeded, mut failed) = (0u32, 0u32);
+    for (feed, result) in results {
+        match result {
+            Ok(None) => succeeded += 1,
+            Ok(Some(error)) => {
+                tracing::warn!(feed = feed.pk, url = %feed.url, error = %error, "feed poll failed");
+                failed += 1;
+            }
+            Err(e) => {
+                tracing::error!(feed = feed.pk, url = %feed.url, error = %e, "feed sync failed");
+                failed += 1;
+            }
+        }
+    }
 
     Ok(SyncSummary { succeeded, failed })
+}
+
+async fn resolve_hosts(feeds: &[Feed]) -> HashMap<String, IpAddr> {
+    let hosts: HashSet<(String, u16)> = feeds
+        .iter()
+        .filter_map(|feed| reqwest::Url::parse(&feed.url).ok())
+        .filter_map(|url| Some((url.host_str()?.to_string(), url.port_or_known_default()?)))
+        .collect();
+
+    let lookups = hosts.into_iter().map(|(host, port)| async move {
+        let addr = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .ok()?
+            .next()?;
+        Some((host, addr.ip()))
+    });
+    futures::future::join_all(lookups)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 // Returns the poll error, if any; Err is for database failures only.
@@ -71,7 +102,8 @@ async fn poll_feed(
         database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
     }
 
-    let update = poll::next_state(feed, &outcome, &redirects, now);
+    let newest_article_at = database::newest_article_at(db, feed.pk).await?;
+    let update = poll::next_state(feed, &outcome, &redirects, newest_article_at, now);
     if let Some(moved_to) = &update.moved_to {
         tracing::warn!(feed = feed.pk, from = %feed.url, to = %moved_to, "feed moved permanently");
     }
@@ -207,7 +239,10 @@ mod tests {
 
         let updated = list_feed(&db, feed.pk).await.unwrap().unwrap();
         assert_eq!(updated.last_refresh, Some(1000));
-        assert_eq!(updated.next_poll_at, Some(1000 + updated.refresh_interval));
+        assert_eq!(
+            updated.next_poll_at,
+            Some(1000 + 3600 + poll::jitter(feed.pk, 3600))
+        );
 
         server.abort();
     }
@@ -252,7 +287,10 @@ mod tests {
 
         let updated_bad = list_feed(&db, bad.pk).await.unwrap().unwrap();
         assert_eq!(updated_bad.last_refresh, None);
-        assert_eq!(updated_bad.next_poll_at, Some(1000 + 2 * 3600));
+        assert_eq!(
+            updated_bad.next_poll_at,
+            Some(1000 + 7200 + poll::jitter(bad.pk, 7200))
+        );
         assert_eq!(updated_bad.failure_count, 1);
         assert!(updated_bad.last_error.is_some());
 
@@ -332,10 +370,10 @@ mod tests {
             Some("Mon, 01 Jan 2026 00:00:00 GMT")
         );
 
-        let second = sync_feeds_at(&db, &client(), 1000 + 3600).await.unwrap();
+        let second = sync_feeds_at(&db, &client(), 1000 + 7200).await.unwrap();
         assert_eq!(second.succeeded, 1);
         let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
-        assert_eq!(stored.last_refresh, Some(1000 + 3600));
+        assert_eq!(stored.last_refresh, Some(1000 + 7200));
         assert_eq!(stored.etag.as_deref(), Some("\"v1\""));
         assert_eq!(stored.failure_count, 0);
 
@@ -366,7 +404,10 @@ mod tests {
         let summary = sync_feeds_at(&db, &client(), 1000).await.unwrap();
         assert_eq!(summary.failed, 1);
         let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
-        assert_eq!(stored.next_poll_at, Some(1000 + 86400));
+        assert_eq!(
+            stored.next_poll_at,
+            Some(1000 + 86400 + poll::jitter(feed.pk, 86400))
+        );
         assert_eq!(stored.etag.as_deref(), Some("x"));
         assert_eq!(stored.last_modified.as_deref(), Some("y"));
         assert_eq!(stored.last_error.as_deref(), Some("HTTP 429: slow down"));

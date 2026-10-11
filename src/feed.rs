@@ -6,7 +6,8 @@ use crate::database::DbError;
 use crate::database::ParsedArticle;
 use crate::filter;
 use crate::http;
-use crate::poll::{self, Validators};
+use crate::poll::{self, FeedHints, Validators};
+use regex::Regex;
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
 
@@ -90,7 +91,12 @@ pub async fn create_feed_with_articles(
     database::record_poll(
         db,
         feed.pk,
-        &poll::after_add(&feed, fetched.validators, crate::sync::unix_now()),
+        &poll::after_add(
+            &feed,
+            fetched.validators,
+            fetched.hints,
+            crate::sync::unix_now(),
+        ),
     )
     .await?;
 
@@ -153,7 +159,12 @@ pub async fn import_opml_feeds(
         database::record_poll(
             db,
             db_feed.pk,
-            &poll::after_add(&db_feed, fetched.validators, crate::sync::unix_now()),
+            &poll::after_add(
+                &db_feed,
+                fetched.validators,
+                fetched.hints,
+                crate::sync::unix_now(),
+            ),
         )
         .await?;
     }
@@ -172,6 +183,7 @@ pub struct ParsedFeedResult {
     pub link: String,
     pub articles: Vec<ParsedArticle>,
     pub skipped: Vec<SkipReason>,
+    pub hints: FeedHints,
 }
 
 // feed-rs defaults an Atom <link>'s rel to "alternate" only when the XML
@@ -199,13 +211,47 @@ pub fn parse_feed(bytes: &[u8], base_uri: &str) -> Result<ParsedFeedResult, Feed
         .parse(bytes)?;
     let title = feed.title.as_ref().map(|t| t.content.clone());
     let link = select_display_link(&feed.links).ok_or(FeedError::MissingLink)?;
+    let hints = parse_hints(bytes, feed.ttl);
     let (articles, skipped) = process_feed(feed);
     Ok(ParsedFeedResult {
         title,
         link,
         articles,
         skipped,
+        hints,
     })
+}
+
+// feed-rs exposes RSS <ttl> but not <skipHours>/<skipDays>, so those are
+// read from the raw XML.
+fn parse_hints(bytes: &[u8], ttl_minutes: Option<u32>) -> FeedHints {
+    let xml = String::from_utf8_lossy(bytes);
+    let values = |outer: &str, inner: &str| -> Vec<String> {
+        let block = Regex::new(&format!(r"(?s)<{outer}>(.*?)</{outer}>")).unwrap();
+        let item = Regex::new(&format!(r"<{inner}>\s*([^<]*?)\s*</{inner}>")).unwrap();
+        block
+            .captures(&xml)
+            .map(|block| {
+                item.captures_iter(&block[1])
+                    .map(|c| c[1].to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    FeedHints {
+        ttl_secs: ttl_minutes.map(|m| i64::from(m) * 60),
+        // RSS allows 24 for midnight.
+        skip_hours: values("skipHours", "hour")
+            .iter()
+            .filter_map(|h| h.parse::<u32>().ok())
+            .filter(|h| *h <= 24)
+            .map(|h| h % 24)
+            .collect(),
+        skip_days: values("skipDays", "day")
+            .iter()
+            .filter_map(|d| d.parse().ok())
+            .collect(),
+    }
 }
 
 pub struct FetchedFeed {
@@ -213,6 +259,7 @@ pub struct FetchedFeed {
     pub link: String,
     pub articles: Vec<ParsedArticle>,
     pub validators: Validators,
+    pub hints: FeedHints,
 }
 
 pub async fn fetch_feed(
@@ -235,6 +282,7 @@ pub async fn fetch_feed(
         link,
         articles,
         skipped,
+        hints,
     } = parse_feed(&response.body, response.url.as_str())?;
     log_skipped(&skipped);
     Ok(FetchedFeed {
@@ -242,6 +290,7 @@ pub async fn fetch_feed(
         link,
         articles,
         validators: Validators::from_headers(&response.headers),
+        hints,
     })
 }
 
@@ -720,5 +769,28 @@ mod tests {
         assert!(stored.last_refresh.is_some());
 
         server.abort();
+    }
+
+    #[test]
+    fn rss_poll_hints_are_parsed() {
+        let xml = r#"<rss version="2.0"><channel>
+            <title>Feed</title>
+            <link>https://example.com</link>
+            <ttl>90</ttl>
+            <skipHours><hour>0</hour><hour> 7 </hour><hour>24</hour><hour>x</hour></skipHours>
+            <skipDays><day>Saturday</day><day>Sunday</day></skipDays>
+        </channel></rss>"#;
+        let hints = parse_feed(xml.as_bytes(), BASE_URI).unwrap().hints;
+        assert_eq!(hints.ttl_secs, Some(90 * 60));
+        assert_eq!(hints.skip_hours, vec![0, 7, 0]);
+        assert_eq!(
+            hints.skip_days,
+            vec![chrono::Weekday::Sat, chrono::Weekday::Sun]
+        );
+
+        let none = parse_feed(RSS_HAPPY_PATH.as_bytes(), BASE_URI)
+            .unwrap()
+            .hints;
+        assert_eq!(none, FeedHints::default());
     }
 }

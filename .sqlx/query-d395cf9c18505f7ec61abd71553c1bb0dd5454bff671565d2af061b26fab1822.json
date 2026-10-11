@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to\n           FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name",
+  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed\n           WHERE disabled = 0 AND (next_poll_at IS NULL OR next_poll_at <= ?)",
   "describe": {
     "columns": [
       {
@@ -189,6 +189,39 @@
             "name": "redirected_to"
           }
         }
+      },
+      {
+        "name": "ttl_secs",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "ttl_secs"
+          }
+        }
+      },
+      {
+        "name": "skip_hours",
+        "ordinal": 18,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_hours"
+          }
+        }
+      },
+      {
+        "name": "skip_days",
+        "ordinal": 19,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_days"
+          }
+        }
       }
     ],
     "parameters": {
@@ -211,8 +244,11 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      false,
+      false
     ]
   },
-  "hash": "2d8d5cba308419d7a2ed19ac41715fcb99eccd4e7b764d1bb33f6c865ae5d70e"
+  "hash": "d395cf9c18505f7ec61abd71553c1bb0dd5454bff671565d2af061b26fab1822"
 }

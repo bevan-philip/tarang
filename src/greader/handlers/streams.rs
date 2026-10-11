@@ -443,6 +443,9 @@ mod tests {
             last_error: None,
             moved_from: None,
             redirected_to: None,
+            ttl_secs: None,
+            skip_hours: String::new(),
+            skip_days: String::new(),
         }
     }
 

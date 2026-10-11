@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               display_url = COALESCE(?, display_url),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval),\n               category = CASE WHEN ? THEN ? ELSE category END,\n               greader_hidden = COALESCE(?, greader_hidden)\n           WHERE pk = ?\n           RETURNING pk, name, url, display_url, category as \"category: Option<i64>\", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to",
+  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed WHERE url = ?",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "category: Option<i64>",
+        "name": "category",
         "ordinal": 4,
         "type_info": "Integer",
         "origin": {
@@ -189,30 +189,66 @@
             "name": "redirected_to"
           }
         }
+      },
+      {
+        "name": "ttl_secs",
+        "ordinal": 17,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "ttl_secs"
+          }
+        }
+      },
+      {
+        "name": "skip_hours",
+        "ordinal": 18,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_hours"
+          }
+        }
+      },
+      {
+        "name": "skip_days",
+        "ordinal": 19,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "skip_days"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 8
+      "Right": 1
     },
     "nullable": [
       false,
       false,
       false,
       false,
-      false,
-      false,
-      false,
-      true,
-      true,
-      false,
-      true,
       true,
       false,
       false,
       true,
       true,
-      true
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
     ]
   },
-  "hash": "f661a91eb70cedc3ab843e3da9fe90fda3c162994fab348677b5eff46b5db250"
+  "hash": "984f0d47ab6acefce67b79535f998ab1d17bff91dbad001702d412f2dfde84d3"
 }

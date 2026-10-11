@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(published_at) as \"newest: i64\" FROM article WHERE feed = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "newest: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "efabfdbe522614a34e04435e58ebfe2cfd1277b77c88faa51de7cb6d25d94e80"
+}
