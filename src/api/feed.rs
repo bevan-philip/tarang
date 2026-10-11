@@ -15,7 +15,7 @@ use crate::{
         set_feed_disabled, update_feed,
     },
     discovery::resolve_feed_url,
-    feed::{FeedOptions, create_feed_with_articles},
+    feed::{FeedOptions, check_url, create_feed_with_articles},
 };
 
 #[derive(Serialize, JsonSchema)]
@@ -55,6 +55,8 @@ pub struct PostFeedReq {
 pub struct PostFeedResp {
     pub name: String,
     pub id: i64,
+    /// The feed URL that was stored. Discovery can change it from the URL given.
+    pub url: String,
     pub greader_hidden: bool,
 }
 
@@ -66,10 +68,12 @@ pub async fn post_feed(
     }): State<AppState>,
     Json(payload): Json<PostFeedReq>,
 ) -> Result<Json<PostFeedResp>, AppError> {
-    let url = if payload.discovery.unwrap_or(true) {
-        resolve_feed_url(&http, &discovery, &payload.url).await?
+    check_url(&payload.url)?;
+    let (url, response) = if payload.discovery.unwrap_or(true) {
+        let discovered = resolve_feed_url(&http, &discovery, &payload.url).await?;
+        (discovered.url, discovered.response)
     } else {
-        payload.url.clone()
+        (payload.url.clone(), None)
     };
 
     let feed = create_feed_with_articles(
@@ -82,6 +86,7 @@ pub async fn post_feed(
             metadata: payload.metadata,
             refresh_interval: payload.refresh_interval,
             greader_hidden: payload.greader_hidden.unwrap_or(false),
+            response,
         },
     )
     .await?;
@@ -89,6 +94,7 @@ pub async fn post_feed(
     Ok(Json(PostFeedResp {
         name: feed.name,
         id: feed.pk,
+        url: feed.url,
         greader_hidden: feed.greader_hidden,
     }))
 }
@@ -166,6 +172,57 @@ mod tests {
             http: reqwest::Client::new(),
             discovery: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn adding_a_feed_through_discovery_fetches_it_once() {
+        use axum::{
+            Router,
+            routing::{get, post},
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static HITS: AtomicUsize = AtomicUsize::new(0);
+        let state = test_state().await;
+        let app = Router::new()
+            .route("/feed", post(post_feed))
+            .route(
+                "/rss",
+                get(|| async {
+                    HITS.fetch_add(1, Ordering::SeqCst);
+                    r#"<rss version="2.0"><channel><title>T</title><link>https://example.com</link></channel></rss>"#
+                }),
+            )
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": format!("{base}/rss")}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&response.text().await.unwrap()).unwrap();
+        assert_eq!(body["url"], format!("{base}/rss"));
+        assert_eq!(HITS.load(Ordering::SeqCst), 1);
+
+        let response = client
+            .post(format!("{base}/feed"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({"url": format!("{base}/rss ")}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(HITS.load(Ordering::SeqCst), 1);
+
+        server.abort();
     }
 
     #[tokio::test]

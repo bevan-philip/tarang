@@ -31,6 +31,7 @@ async fn main() {
         let mut interval = tokio::time::interval(sync_interval);
         let mut polls_since_backup: u32 = 0;
         loop {
+            interval.tick().await;
             match sync::sync_feeds_now(&sync_db, &sync_http).await {
                 Ok(summary) if summary.failed > 0 => {
                     tracing::warn!(
@@ -52,8 +53,6 @@ async fn main() {
                     }
                 }
             }
-
-            interval.tick().await;
         }
     });
 

@@ -9,23 +9,16 @@ use crate::feed;
 pub enum DiscoveryError {
     #[error("failed to fetch {url}: {source}")]
     Fetch { url: String, source: reqwest::Error },
+    #[error("failed to fetch {url}: {}", crate::poll::http_error_message(*status, body))]
+    Http {
+        url: String,
+        status: u16,
+        body: String,
+    },
     #[error("could not discover a feed for {url}")]
     NotFound { url: String },
     #[error("could not resolve a YouTube channel from {url}")]
     YouTubeChannelNotFound { url: String },
-}
-
-fn bluesky_feed_url(url: &Url) -> Option<String> {
-    if url.host_str() != Some("bsky.app") {
-        return None;
-    }
-    let segments: Vec<&str> = url.path_segments()?.collect();
-    let handle = match segments.as_slice() {
-        ["profile", handle] if !handle.is_empty() => *handle,
-        ["profile", handle, ""] if !handle.is_empty() => *handle,
-        _ => return None,
-    };
-    Some(format!("https://bsky.app/profile/{handle}/rss"))
 }
 
 fn is_youtube_host(url: &Url) -> bool {
@@ -99,26 +92,38 @@ fn resolve_from_fetched_page(
     })
 }
 
+pub struct Discovered {
+    pub url: String,
+    /// The fetched response, when `url` is the page that was fetched.
+    pub response: Option<crate::http::Response>,
+}
+
 pub async fn resolve_feed_url(
     http: &reqwest::Client,
     config: &DiscoveryConfig,
     url: &str,
-) -> Result<String, DiscoveryError> {
-    if let Ok(parsed) = Url::parse(url)
-        && let Some(feed_url) = bluesky_feed_url(&parsed)
-    {
-        return Ok(feed_url);
-    }
-
+) -> Result<Discovered, DiscoveryError> {
     let response = crate::http::get(http, url, Default::default())
         .await
         .map_err(|source| DiscoveryError::Fetch {
             url: url.to_string(),
             source,
         })?;
+    if response.status != 200 {
+        return Err(DiscoveryError::Http {
+            url: url.to_string(),
+            status: response.status,
+            body: crate::poll::error_body(&response.body),
+        });
+    }
     let body = String::from_utf8_lossy(&response.body);
+    let feed_url = resolve_from_fetched_page(url, &response.url, &body, config)?;
 
-    resolve_from_fetched_page(url, &response.url, &body, config)
+    let response = (feed_url == url).then_some(response);
+    Ok(Discovered {
+        url: feed_url,
+        response,
+    })
 }
 
 #[cfg(test)]
@@ -127,38 +132,6 @@ mod tests {
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
-    }
-
-    #[test]
-    fn bluesky_matches_bare_profile() {
-        assert_eq!(
-            bluesky_feed_url(&url("https://bsky.app/profile/alice.bsky.social")),
-            Some("https://bsky.app/profile/alice.bsky.social/rss".to_string())
-        );
-    }
-
-    #[test]
-    fn bluesky_matches_profile_with_trailing_slash() {
-        assert_eq!(
-            bluesky_feed_url(&url("https://bsky.app/profile/alice.bsky.social/")),
-            Some("https://bsky.app/profile/alice.bsky.social/rss".to_string())
-        );
-    }
-
-    #[test]
-    fn bluesky_rejects_extra_path_segments() {
-        assert_eq!(
-            bluesky_feed_url(&url("https://bsky.app/profile/alice.bsky.social/post/123")),
-            None
-        );
-    }
-
-    #[test]
-    fn bluesky_rejects_other_hosts() {
-        assert_eq!(
-            bluesky_feed_url(&url("https://example.com/profile/alice")),
-            None
-        );
     }
 
     #[test]
@@ -352,26 +325,15 @@ mod tests {
         assert!(matches!(result, Err(DiscoveryError::NotFound { .. })));
     }
 
-    #[tokio::test]
-    async fn bluesky_short_circuits_without_a_network_call() {
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        let result = resolve_feed_url(
-            &client,
-            &DiscoveryConfig::default(),
-            "https://bsky.app/profile/alice.bsky.social",
-        )
-        .await;
-        assert_eq!(
-            result.unwrap(),
-            "https://bsky.app/profile/alice.bsky.social/rss"
-        );
-    }
-
     async fn spawn_test_server() -> (String, tokio::task::JoinHandle<()>) {
         use axum::{Router, routing::get};
 
         let app = Router::new()
             .route("/feed.xml", get(|| async { RSS_XML }))
+            .route(
+                "/missing",
+                get(|| async { (axum::http::StatusCode::NOT_FOUND, "no such page") }),
+            )
             .route(
                 "/page",
                 get(|| async {
@@ -394,8 +356,11 @@ mod tests {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let feed_url = format!("{base}/feed.xml");
 
-        let result = resolve_feed_url(&client, &DiscoveryConfig::default(), &feed_url).await;
-        assert_eq!(result.unwrap(), feed_url);
+        let result = resolve_feed_url(&client, &DiscoveryConfig::default(), &feed_url)
+            .await
+            .unwrap();
+        assert_eq!(result.url, feed_url);
+        assert!(result.response.is_some());
 
         server.abort();
     }
@@ -406,8 +371,11 @@ mod tests {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let page_url = format!("{base}/page");
 
-        let result = resolve_feed_url(&client, &DiscoveryConfig::default(), &page_url).await;
-        assert_eq!(result.unwrap(), format!("{base}/feed.xml"));
+        let result = resolve_feed_url(&client, &DiscoveryConfig::default(), &page_url)
+            .await
+            .unwrap();
+        assert_eq!(result.url, format!("{base}/feed.xml"));
+        assert!(result.response.is_none());
 
         server.abort();
     }
@@ -422,5 +390,24 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(DiscoveryError::Fetch { .. })));
+    }
+
+    #[tokio::test]
+    async fn error_status_is_reported_with_its_body() {
+        let (base, server) = spawn_test_server().await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let result = resolve_feed_url(
+            &client,
+            &DiscoveryConfig::default(),
+            &format!("{base}/missing"),
+        )
+        .await;
+        let Err(err @ DiscoveryError::Http { status: 404, .. }) = result else {
+            panic!("expected an HTTP error");
+        };
+        assert!(err.to_string().contains("no such page"));
+
+        server.abort();
     }
 }

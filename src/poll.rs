@@ -24,7 +24,7 @@ impl Validators {
         }
     }
 
-    fn from_headers(headers: &HeaderMap) -> Self {
+    pub fn from_headers(headers: &HeaderMap) -> Self {
         let get = |name| {
             headers
                 .get(name)
@@ -92,13 +92,17 @@ pub fn interpret(response: &Result<Response, String>, now: i64) -> Outcome {
                 .get(RETRY_AFTER)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| parse_retry_after(v, now)),
-            body: String::from_utf8_lossy(&response.body)
-                .trim()
-                .chars()
-                .take(ERROR_BODY_CHARS)
-                .collect(),
+            body: error_body(&response.body),
         },
     }
+}
+
+pub fn error_body(body: &[u8]) -> String {
+    String::from_utf8_lossy(body)
+        .trim()
+        .chars()
+        .take(ERROR_BODY_CHARS)
+        .collect()
 }
 
 pub fn parse_retry_after(value: &str, now: i64) -> Option<i64> {
@@ -146,6 +150,15 @@ fn temporary_target(redirects: &[Redirect]) -> Option<String> {
         .any(|r| !matches!(r.status, 301 | 308))
         .then(|| redirects.last().map(|r| r.location.clone()))
         .flatten()
+}
+
+pub fn after_add(feed: &Feed, validators: Validators, now: i64) -> PollUpdate {
+    PollUpdate {
+        last_refresh: Some(now),
+        next_poll_at: now + feed.refresh_interval,
+        validators: Some(validators),
+        ..Default::default()
+    }
 }
 
 pub fn next_state(feed: &Feed, outcome: &Outcome, redirects: &[Redirect], now: i64) -> PollUpdate {
@@ -201,7 +214,7 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, redirects: &[Redirect], now: i
     }
 }
 
-fn http_error_message(status: u16, body: &str) -> String {
+pub fn http_error_message(status: u16, body: &str) -> String {
     if body.is_empty() {
         format!("HTTP {status}")
     } else {
