@@ -16,6 +16,15 @@ pub struct Feed {
     pub last_refresh: Option<i64>,
     pub next_poll_at: Option<i64>,
     pub greader_hidden: bool,
+    #[serde(skip)]
+    pub etag: Option<String>,
+    #[serde(skip)]
+    pub last_modified: Option<String>,
+    pub failure_count: i64,
+    pub disabled: bool,
+    pub last_error: Option<String>,
+    pub moved_from: Option<String>,
+    pub redirected_to: Option<String>,
 }
 
 impl Feed {
@@ -49,7 +58,7 @@ pub async fn create_feed(
         Feed,
         r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool""#,
+           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to"#,
         name,
         url,
         display_url,
@@ -67,7 +76,7 @@ pub async fn create_feed(
 pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
            FROM feed WHERE pk = ?"#,
         pk,
     )
@@ -80,7 +89,7 @@ pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
 pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
            FROM feed WHERE url = ?"#,
         url,
     )
@@ -94,7 +103,7 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
     let visible_only = scope.visible_only();
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
            FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name"#,
         visible_only,
     )
@@ -107,9 +116,9 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
 pub async fn list_feeds_due_for_refresh_at(db: &Db, now: i64) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool"
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
            FROM feed
-           WHERE next_poll_at IS NULL OR next_poll_at <= ?"#,
+           WHERE disabled = 0 AND (next_poll_at IS NULL OR next_poll_at <= ?)"#,
         now,
     )
     .fetch_all(&db.read)
@@ -129,6 +138,60 @@ pub async fn update_feed_last_refresh(
         last_refresh,
         next_poll_at,
         pk
+    )
+    .execute(&db.write)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> DbResult<()> {
+    let validators_provided = update.validators.is_some();
+    let validators = update.validators.clone().unwrap_or_default();
+    sqlx::query!(
+        r#"UPDATE feed
+           SET last_refresh = COALESCE(?, last_refresh),
+               next_poll_at = ?,
+               failure_count = ?,
+               disabled = ?,
+               last_error = ?,
+               etag = CASE WHEN ? THEN ? ELSE etag END,
+               last_modified = CASE WHEN ? THEN ? ELSE last_modified END,
+               moved_from = CASE WHEN ? IS NOT NULL THEN url ELSE moved_from END,
+               url = COALESCE(?, url),
+               redirected_to = ?
+           WHERE pk = ?"#,
+        update.last_refresh,
+        update.next_poll_at,
+        update.failure_count,
+        update.disabled,
+        update.last_error,
+        validators_provided,
+        validators.etag,
+        validators_provided,
+        validators.last_modified,
+        update.moved_to,
+        update.moved_to,
+        update.redirected_to,
+        pk,
+    )
+    .execute(&db.write)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn set_feed_disabled(db: &Db, pk: i64, disabled: bool) -> DbResult<()> {
+    sqlx::query!(
+        r#"UPDATE feed
+           SET disabled = ?,
+               failure_count = CASE WHEN ? THEN failure_count ELSE 0 END,
+               next_poll_at = CASE WHEN ? THEN next_poll_at ELSE NULL END
+           WHERE pk = ?"#,
+        disabled,
+        disabled,
+        disabled,
+        pk,
     )
     .execute(&db.write)
     .await?;
@@ -160,7 +223,7 @@ pub async fn update_feed(
                category = CASE WHEN ? THEN ? ELSE category END,
                greader_hidden = COALESCE(?, greader_hidden)
            WHERE pk = ?
-           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool""#,
+           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to"#,
         name,
         display_url,
         metadata,
@@ -213,6 +276,13 @@ mod tests {
             last_refresh: None,
             next_poll_at: None,
             greader_hidden: false,
+            etag: None,
+            last_modified: None,
+            failure_count: 0,
+            disabled: false,
+            last_error: None,
+            moved_from: None,
+            redirected_to: None,
         }
     }
 

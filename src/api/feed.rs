@@ -11,7 +11,8 @@ use crate::{
     AppState,
     database::{
         ArticlePreview, DbError, Feed, StarredArticlePreview, drop_feed,
-        list_article_previews_for_feed, list_feed, list_starred_articles_with_feed, update_feed,
+        list_article_previews_for_feed, list_feed, list_starred_articles_with_feed,
+        set_feed_disabled, update_feed,
     },
     discovery::resolve_feed_url,
     feed::{FeedOptions, create_feed_with_articles},
@@ -107,6 +108,8 @@ pub struct PatchFeedReq {
     metadata: Option<String>,
     refresh_interval: Option<i64>,
     greader_hidden: Option<bool>,
+    /// Set to false to resume polls of a feed that Tarang disabled after errors.
+    disabled: Option<bool>,
     #[serde(default, with = "::serde_with::rust::double_option")]
     #[schemars(with = "Option<i64>")]
     category_id: Option<Option<i64>>,
@@ -117,6 +120,9 @@ pub async fn patch_feed(
     Path(id): Path<i64>,
     Json(payload): Json<PatchFeedReq>,
 ) -> Result<Json<Feed>, AppError> {
+    if let Some(disabled) = payload.disabled {
+        set_feed_disabled(&db, id, disabled).await?;
+    }
     let feed = update_feed(
         &db,
         id,

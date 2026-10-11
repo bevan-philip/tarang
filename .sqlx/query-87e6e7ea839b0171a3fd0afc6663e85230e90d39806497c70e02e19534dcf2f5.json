@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\"\n           FROM feed\n           WHERE next_poll_at IS NULL OR next_poll_at <= ?",
+  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to\n           FROM feed WHERE url = ?",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,83 @@
             "name": "greader_hidden"
           }
         }
+      },
+      {
+        "name": "etag",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "name": "last_modified",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_modified"
+          }
+        }
+      },
+      {
+        "name": "failure_count",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "failure_count"
+          }
+        }
+      },
+      {
+        "name": "disabled: bool",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "disabled"
+          }
+        }
+      },
+      {
+        "name": "last_error",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "name": "moved_from",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "moved_from"
+          }
+        }
+      },
+      {
+        "name": "redirected_to",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "redirected_to"
+          }
+        }
       }
     ],
     "parameters": {
@@ -127,8 +204,15 @@
       false,
       true,
       true,
-      false
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "7cd385da29365e1300f84d5eaf6ccd0ccd93dadea3ba8cb64579ea77a6315490"
+  "hash": "87e6e7ea839b0171a3fd0afc6663e85230e90d39806497c70e02e19534dcf2f5"
 }

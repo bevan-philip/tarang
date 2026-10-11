@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\"",
+  "query": "INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,83 @@
             "name": "greader_hidden"
           }
         }
+      },
+      {
+        "name": "etag",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "name": "last_modified",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_modified"
+          }
+        }
+      },
+      {
+        "name": "failure_count",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "failure_count"
+          }
+        }
+      },
+      {
+        "name": "disabled: bool",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "disabled"
+          }
+        }
+      },
+      {
+        "name": "last_error",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "name": "moved_from",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "moved_from"
+          }
+        }
+      },
+      {
+        "name": "redirected_to",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "redirected_to"
+          }
+        }
       }
     ],
     "parameters": {
@@ -127,8 +204,15 @@
       false,
       true,
       true,
-      false
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "b2b927b0f925bbdfa3e12783eb8d5cfbcfb8744679e69c27f4b5d060ef80b86d"
+  "hash": "f75b6c659c2721ee257908c552c6cd4a5717c35512217bd36971289cfa285305"
 }

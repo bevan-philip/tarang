@@ -1,10 +1,91 @@
-const PROJECT_URL: &str = "https://github.com/bevan-philip/tarang";
+use reqwest::header::{HeaderMap, LOCATION};
 
+const PROJECT_URL: &str = "https://github.com/bevan-philip/tarang";
+const MAX_REDIRECTS: usize = 10;
+
+// Redirects are followed by `get` rather than reqwest, so that callers can
+// see each hop and act on permanent moves.
 pub fn client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().user_agent(user_agent(
-        option_env!("TARANG_RELEASE_VERSION"),
-        env!("CARGO_PKG_VERSION"),
-    ))
+    reqwest::Client::builder()
+        .user_agent(user_agent(
+            option_env!("TARANG_RELEASE_VERSION"),
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .redirect(reqwest::redirect::Policy::none())
+        .referer(false)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Redirect {
+    pub status: u16,
+    pub location: String,
+}
+
+#[derive(Debug)]
+pub struct Response {
+    pub status: u16,
+    pub url: reqwest::Url,
+    pub headers: HeaderMap,
+    pub body: Vec<u8>,
+    pub redirects: Vec<Redirect>,
+}
+
+pub async fn get(
+    client: &reqwest::Client,
+    url: &str,
+    headers: HeaderMap,
+) -> Result<Response, reqwest::Error> {
+    let mut request_url = url.to_string();
+    let mut redirects = Vec::new();
+
+    loop {
+        let response = client
+            .get(&request_url)
+            .headers(headers.clone())
+            .send()
+            .await?;
+        let status = response.status();
+        let url = response.url().clone();
+
+        let next = status
+            .is_redirection()
+            .then(|| response.headers().get(LOCATION))
+            .flatten()
+            .and_then(|v| v.to_str().ok())
+            .and_then(|loc| url.join(loc).ok());
+
+        match next {
+            Some(next) if redirects.len() < MAX_REDIRECTS => {
+                redirects.push(Redirect {
+                    status: status.as_u16(),
+                    location: next.to_string(),
+                });
+                request_url = next.to_string();
+            }
+            _ => {
+                let headers = response.headers().clone();
+                let body = response.bytes().await?.to_vec();
+                return Ok(Response {
+                    status: status.as_u16(),
+                    url,
+                    headers,
+                    body,
+                    redirects,
+                });
+            }
+        }
+    }
+}
+
+pub fn describe_error(err: &dyn std::error::Error) -> String {
+    let mut message = err.to_string();
+    let mut source = err.source();
+    while let Some(err) = source {
+        message.push_str(": ");
+        message.push_str(&err.to_string());
+        source = err.source();
+    }
+    message
 }
 
 fn user_agent(release_tag: Option<&str>, package_version: &str) -> String {

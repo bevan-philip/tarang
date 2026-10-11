@@ -27,6 +27,7 @@ pub mod filter;
 pub mod greader;
 pub mod http;
 pub mod opml;
+pub mod poll;
 pub mod sync;
 
 #[derive(Clone)]

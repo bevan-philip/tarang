@@ -436,6 +436,13 @@ mod tests {
             last_refresh: None,
             next_poll_at: None,
             greader_hidden: false,
+            etag: None,
+            last_modified: None,
+            failure_count: 0,
+            disabled: false,
+            last_error: None,
+            moved_from: None,
+            redirected_to: None,
         }
     }
 
