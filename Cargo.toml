@@ -13,7 +13,7 @@ form_urlencoded = "1"
 futures = "0.3.33"
 opml = "1.1.6"
 regex = "1.13.1"
-reqwest = "0.13.4"
+reqwest = { version = "0.13.4", features = ["gzip", "brotli"] }
 schemars = "0.9"
 scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
