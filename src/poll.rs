@@ -134,22 +134,8 @@ fn backoff(refresh_interval: i64, failure_count: i64) -> i64 {
         .max(refresh_interval)
 }
 
-// The leading run of 301/308 hops is a permanent move; anything after a
-// temporary hop is not.
-fn permanent_target(redirects: &[Redirect]) -> Option<String> {
-    redirects
-        .iter()
-        .take_while(|r| matches!(r.status, 301 | 308))
-        .last()
-        .map(|r| r.location.clone())
-}
-
-fn temporary_target(redirects: &[Redirect]) -> Option<String> {
-    redirects
-        .iter()
-        .any(|r| !matches!(r.status, 301 | 308))
-        .then(|| redirects.last().map(|r| r.location.clone()))
-        .flatten()
+fn is_permanent(redirect: &Redirect) -> bool {
+    matches!(redirect.status, 301 | 308)
 }
 
 pub fn after_add(feed: &Feed, validators: Validators, now: i64) -> PollUpdate {
@@ -161,11 +147,20 @@ pub fn after_add(feed: &Feed, validators: Validators, now: i64) -> PollUpdate {
     }
 }
 
-pub fn next_state(feed: &Feed, outcome: &Outcome, redirects: &[Redirect], now: i64) -> PollUpdate {
+pub fn next_state(
+    feed: &Feed,
+    outcome: &Outcome,
+    redirect: Option<&Redirect>,
+    now: i64,
+) -> PollUpdate {
     let interval = feed.refresh_interval;
     let base = PollUpdate {
-        moved_to: permanent_target(redirects),
-        redirected_to: temporary_target(redirects),
+        moved_to: redirect
+            .filter(|r| is_permanent(r))
+            .map(|r| r.location.clone()),
+        redirected_to: redirect
+            .filter(|r| !is_permanent(r))
+            .map(|r| r.location.clone()),
         ..Default::default()
     };
 
@@ -263,7 +258,7 @@ mod tests {
             url: reqwest::Url::parse("https://example.com/feed").unwrap(),
             headers: map,
             body: body.as_bytes().to_vec(),
-            redirects: vec![],
+            redirect: None,
         })
     }
 
@@ -382,7 +377,7 @@ mod tests {
             validators: validators.clone(),
             feed: parse_feed(RSS.as_bytes(), "https://example.com/feed").unwrap(),
         };
-        let update = next_state(&feed(3), &outcome, &[], NOW);
+        let update = next_state(&feed(3), &outcome, None, NOW);
         assert_eq!(
             update,
             PollUpdate {
@@ -396,7 +391,7 @@ mod tests {
 
     #[test]
     fn not_modified_keeps_existing_validators() {
-        let update = next_state(&feed(0), &Outcome::NotModified, &[], NOW);
+        let update = next_state(&feed(0), &Outcome::NotModified, None, NOW);
         assert_eq!(update.validators, None);
         assert_eq!(update.last_refresh, Some(NOW));
         assert_eq!(update.next_poll_at, NOW + 3600);
@@ -405,87 +400,81 @@ mod tests {
     #[test]
     fn failures_back_off_exponentially_and_never_speed_up() {
         let error = Outcome::RequestError("connection refused".to_string());
-        let first = next_state(&feed(0), &error, &[], NOW);
+        let first = next_state(&feed(0), &error, None, NOW);
         assert_eq!(first.next_poll_at, NOW + 7200);
         assert_eq!(first.failure_count, 1);
         assert_eq!(first.last_error.as_deref(), Some("connection refused"));
         assert_eq!(first.last_refresh, None);
         assert_eq!(first.validators, None);
 
-        let third = next_state(&feed(2), &error, &[], NOW);
+        let third = next_state(&feed(2), &error, None, NOW);
         assert_eq!(third.next_poll_at, NOW + 3600 * 8);
 
-        let capped = next_state(&feed(8), &error, &[], NOW);
+        let capped = next_state(&feed(8), &error, None, NOW);
         assert_eq!(capped.next_poll_at, NOW + MAX_BACKOFF_SECS);
     }
 
     #[test]
     fn repeated_failures_disable_the_feed() {
         let error = http_error(404, None);
-        assert!(!next_state(&feed(MAX_FAILURES - 2), &error, &[], NOW).disabled);
-        assert!(next_state(&feed(MAX_FAILURES - 1), &error, &[], NOW).disabled);
+        assert!(!next_state(&feed(MAX_FAILURES - 2), &error, None, NOW).disabled);
+        assert!(next_state(&feed(MAX_FAILURES - 1), &error, None, NOW).disabled);
 
         let not_a_feed = Outcome::NotAFeed("bad xml".to_string());
-        assert!(next_state(&feed(MAX_FAILURES - 1), &not_a_feed, &[], NOW).disabled);
+        assert!(next_state(&feed(MAX_FAILURES - 1), &not_a_feed, None, NOW).disabled);
     }
 
     #[test]
     fn gone_disables_immediately() {
-        let update = next_state(&feed(0), &http_error(410, None), &[], NOW);
+        let update = next_state(&feed(0), &http_error(410, None), None, NOW);
         assert!(update.disabled);
         assert_eq!(update.last_error.as_deref(), Some("HTTP 410"));
     }
 
     #[test]
     fn too_many_requests_honours_retry_after_and_never_disables() {
-        let update = next_state(&feed(0), &http_error(429, Some(86400)), &[], NOW);
+        let update = next_state(&feed(0), &http_error(429, Some(86400)), None, NOW);
         assert_eq!(update.next_poll_at, NOW + 86400);
         assert_eq!(update.validators, None);
 
-        let no_hint = next_state(&feed(0), &http_error(429, None), &[], NOW);
+        let no_hint = next_state(&feed(0), &http_error(429, None), None, NOW);
         assert_eq!(no_hint.next_poll_at, NOW + 7200);
 
-        assert!(!next_state(&feed(50), &http_error(429, None), &[], NOW).disabled);
+        assert!(!next_state(&feed(50), &http_error(429, None), None, NOW).disabled);
     }
 
     #[test]
     fn short_retry_after_does_not_speed_up_polling() {
-        let update = next_state(&feed(0), &http_error(503, Some(5)), &[], NOW);
+        let update = next_state(&feed(0), &http_error(503, Some(5)), None, NOW);
         assert_eq!(update.next_poll_at, NOW + 7200);
     }
 
     #[test]
-    fn permanent_redirects_move_the_feed() {
-        let redirects = [
-            redirect(301, "https://a.example/feed"),
-            redirect(308, "https://b.example/feed"),
-            redirect(302, "https://c.example/feed"),
-        ];
-        let update = next_state(&feed(0), &Outcome::NotModified, &redirects, NOW);
-        assert_eq!(update.moved_to.as_deref(), Some("https://b.example/feed"));
-        assert_eq!(
-            update.redirected_to.as_deref(),
-            Some("https://c.example/feed")
-        );
+    fn permanent_redirect_moves_the_feed() {
+        for status in [301, 308] {
+            let redirect = redirect(status, "https://a.example/feed");
+            let update = next_state(&feed(0), &Outcome::NotModified, Some(&redirect), NOW);
+            assert_eq!(update.moved_to.as_deref(), Some("https://a.example/feed"));
+            assert_eq!(update.redirected_to, None);
+        }
     }
 
     #[test]
-    fn temporary_redirect_first_does_not_move_the_feed() {
-        let redirects = [
-            redirect(302, "https://a.example/feed"),
-            redirect(301, "https://b.example/feed"),
-        ];
-        let update = next_state(&feed(0), &Outcome::NotModified, &redirects, NOW);
-        assert_eq!(update.moved_to, None);
-        assert_eq!(
-            update.redirected_to.as_deref(),
-            Some("https://b.example/feed")
-        );
+    fn temporary_redirect_does_not_move_the_feed() {
+        for status in [302, 303, 307] {
+            let redirect = redirect(status, "https://a.example/feed");
+            let update = next_state(&feed(0), &Outcome::NotModified, Some(&redirect), NOW);
+            assert_eq!(update.moved_to, None);
+            assert_eq!(
+                update.redirected_to.as_deref(),
+                Some("https://a.example/feed")
+            );
+        }
     }
 
     #[test]
-    fn no_redirects_clears_redirected_to() {
-        let update = next_state(&feed(0), &Outcome::NotModified, &[], NOW);
+    fn no_redirect_clears_redirected_to() {
+        let update = next_state(&feed(0), &Outcome::NotModified, None, NOW);
         assert_eq!(update.moved_to, None);
         assert_eq!(update.redirected_to, None);
     }
