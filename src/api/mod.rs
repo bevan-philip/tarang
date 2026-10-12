@@ -65,7 +65,7 @@ impl IntoResponse for AppError {
                 tracing::warn!(error = %self, "request rejected");
                 (StatusCode::BAD_REQUEST, self.to_string())
             }
-            AppError::Feed(FeedError::InvalidUrl { .. } | FeedError::Http { .. }) => {
+            AppError::Feed(e) if e.is_client_error() => {
                 tracing::warn!(error = %self, "request rejected");
                 (StatusCode::BAD_REQUEST, self.to_string())
             }

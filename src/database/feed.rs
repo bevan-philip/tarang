@@ -133,6 +133,7 @@ pub async fn list_feeds_due_for_refresh_at(db: &Db, now: i64) -> DbResult<Vec<Fe
     Ok(feeds)
 }
 
+#[cfg(test)]
 pub async fn update_feed_last_refresh(
     db: &Db,
     pk: i64,
@@ -163,7 +164,7 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
            SET last_refresh = COALESCE(?, last_refresh),
                next_poll_at = ?,
                failure_count = ?,
-               disabled = ?,
+               disabled = disabled OR ?,
                last_error = ?,
                etag = CASE WHEN ? THEN ? ELSE etag END,
                last_modified = CASE WHEN ? THEN ? ELSE last_modified END,

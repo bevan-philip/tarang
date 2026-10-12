@@ -33,6 +33,10 @@ impl IntoResponse for GReaderError {
                 tracing::warn!(error = %msg, "greader request rejected");
                 (StatusCode::BAD_REQUEST, msg).into_response()
             }
+            GReaderError::Feed(e) if e.is_client_error() => {
+                tracing::warn!(error = %e, "greader request rejected");
+                (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+            }
             other => {
                 tracing::error!(error = %other, "greader request failed");
                 (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()).into_response()

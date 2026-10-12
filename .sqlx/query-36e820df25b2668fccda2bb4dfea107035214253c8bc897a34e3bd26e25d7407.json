@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET last_refresh = COALESCE(?, last_refresh),\n               next_poll_at = ?,\n               failure_count = ?,\n               disabled = disabled OR ?,\n               last_error = ?,\n               etag = CASE WHEN ? THEN ? ELSE etag END,\n               last_modified = CASE WHEN ? THEN ? ELSE last_modified END,\n               moved_from = CASE WHEN ? IS NOT NULL THEN url ELSE moved_from END,\n               url = COALESCE(?, url),\n               redirected_to = ?,\n               ttl_secs = CASE WHEN ? THEN ? ELSE ttl_secs END,\n               skip_hours = CASE WHEN ? THEN ? ELSE skip_hours END,\n               skip_days = CASE WHEN ? THEN ? ELSE skip_days END\n           WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 19
+    },
+    "nullable": []
+  },
+  "hash": "36e820df25b2668fccda2bb4dfea107035214253c8bc897a34e3bd26e25d7407"
+}
