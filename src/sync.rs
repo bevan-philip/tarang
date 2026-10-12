@@ -60,10 +60,7 @@ async fn poll_feed(
     let response = http::get(client, &feed.url, headers)
         .await
         .map_err(|e| http::describe_error(&e));
-    let redirects = response
-        .as_ref()
-        .map(|r| r.redirects.clone())
-        .unwrap_or_default();
+    let redirect = response.as_ref().ok().and_then(|r| r.redirect.clone());
     let outcome = poll::interpret(&response, now);
 
     if let Outcome::Updated { feed: parsed, .. } = &outcome {
@@ -71,7 +68,7 @@ async fn poll_feed(
         database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
     }
 
-    let update = poll::next_state(feed, &outcome, &redirects, now);
+    let update = poll::next_state(feed, &outcome, redirect.as_ref(), now);
     if let Some(moved_to) = &update.moved_to {
         tracing::warn!(feed = feed.pk, from = %feed.url, to = %moved_to, "feed moved permanently");
     }
