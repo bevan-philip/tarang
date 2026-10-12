@@ -1,4 +1,6 @@
-use crate::database::{self, Db, DbResult, Feed, list_feeds_due_for_refresh_at, record_poll};
+use crate::database::{
+    self, Db, DbError, DbResult, Feed, list_feeds_due_for_refresh_at, record_poll,
+};
 use crate::feed::log_skipped;
 use crate::filter::{self, CompiledFilter};
 use crate::http;
@@ -60,17 +62,33 @@ async fn poll_feed(
         .map_err(|e| http::describe_error(&e));
     let outcome = poll::interpret(&response, now);
 
-    if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch {
+    let moved_to_taken = match &outcome.moved_to {
+        Some(url) => database::get_feed_by_url(db, url)
+            .await?
+            .is_some_and(|other| other.pk != feed.pk),
+        None => false,
+    };
+    let update = poll::next_state(feed, &outcome, moved_to_taken, now);
+
+    if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch
+        && !update.disabled
+    {
         log_skipped(&parsed.skipped);
         database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
     }
 
-    let moved_to_taken = match &outcome.moved_to {
-        Some(url) => database::get_feed_by_url(db, url).await?.is_some(),
-        None => false,
+    // Another feed may have moved to the same URL since the check above.
+    let update = match record_poll(db, feed.pk, &update).await {
+        Err(DbError::AlreadyExists(_)) if update.moved_to.is_some() => {
+            let update = poll::next_state(feed, &outcome, true, now);
+            record_poll(db, feed.pk, &update).await?;
+            update
+        }
+        result => {
+            result?;
+            update
+        }
     };
-    let update = poll::next_state(feed, &outcome, moved_to_taken, now);
-    record_poll(db, feed.pk, &update).await?;
     Ok(update.last_error)
 }
 
@@ -428,6 +446,39 @@ mod tests {
         assert!(old.disabled);
         assert_eq!(old.url, format!("{base}/old"));
         assert!(old.last_error.unwrap().contains("another feed"));
+
+        let (articles,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM article WHERE feed = ?")
+            .bind(old.pk)
+            .fetch_one(&db.read)
+            .await
+            .unwrap();
+        assert_eq!(articles, 0);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn chain_of_permanent_redirects_moves_the_feed_to_the_end() {
+        let db = test_db().await;
+        let app = Router::new()
+            .route(
+                "/a",
+                get(|| async { (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, "/b")]) }),
+            )
+            .route(
+                "/b",
+                get(|| async { (StatusCode::PERMANENT_REDIRECT, [(header::LOCATION, "/c")]) }),
+            )
+            .route("/c", get(|| async { RSS }));
+        let (base, server) = serve(app).await;
+        let feed = add_feed(&db, &format!("{base}/a")).await;
+
+        let summary = sync_feeds_at(&db, &client(), 1000).await.unwrap();
+        assert_eq!(summary.succeeded, 1);
+
+        let feed = list_feed(&db, feed.pk).await.unwrap().unwrap();
+        assert_eq!(feed.url, format!("{base}/c"));
+        assert_eq!(feed.moved_from, Some(format!("{base}/a")));
 
         server.abort();
     }
