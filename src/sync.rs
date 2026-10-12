@@ -6,8 +6,6 @@ use crate::filter::{self, CompiledFilter};
 use crate::http;
 use crate::poll::{self, Fetch, Validators};
 use futures::stream::{self, StreamExt};
-use std::collections::{HashMap, HashSet};
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,11 +17,10 @@ pub struct SyncSummary {
 pub async fn sync_feeds_at(db: &Db, client: &reqwest::Client, now: i64) -> DbResult<SyncSummary> {
     let feeds = list_feeds_due_for_refresh_at(db, now).await?;
     let filters = Arc::new(filter::load_compiled_filters(db).await?);
-    let addresses = resolve_hosts(&feeds).await;
 
-    // Feeds on one server are polled one after the other; servers in parallel.
+    // Feeds on one host are polled one after the other; hosts in parallel.
     let results: Vec<(Feed, DbResult<Option<String>>)> =
-        stream::iter(poll::group_by_server(feeds, &addresses))
+        stream::iter(poll::group_by_host(feeds, |feed| &feed.url))
             .map(|group| {
                 let filters = Arc::clone(&filters);
                 async move {
@@ -56,27 +53,6 @@ pub async fn sync_feeds_at(db: &Db, client: &reqwest::Client, now: i64) -> DbRes
     }
 
     Ok(SyncSummary { succeeded, failed })
-}
-
-async fn resolve_hosts(feeds: &[Feed]) -> HashMap<String, IpAddr> {
-    let hosts: HashSet<(String, u16)> = feeds
-        .iter()
-        .filter_map(|feed| reqwest::Url::parse(&feed.url).ok())
-        .filter_map(|url| Some((url.host_str()?.to_string(), url.port_or_known_default()?)))
-        .collect();
-
-    let lookups = hosts.into_iter().map(|(host, port)| async move {
-        let addr = tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .ok()?
-            .next()?;
-        Some((host, addr.ip()))
-    });
-    futures::future::join_all(lookups)
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
 }
 
 // Returns the poll error, if any; Err is for database failures only.

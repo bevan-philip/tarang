@@ -4,9 +4,6 @@ use reqwest::header::{
     RETRY_AFTER,
 };
 
-use std::collections::HashMap;
-use std::net::IpAddr;
-
 use crate::database::Feed;
 use crate::feed::{ParsedFeedResult, parse_feed};
 use crate::http::{Redirect, Response};
@@ -366,18 +363,17 @@ pub fn http_error_message(status: u16, body: &str) -> String {
     }
 }
 
-// Feeds are grouped by IP address where it is known, else by hostname.
-pub fn group_by_server(feeds: Vec<Feed>, addresses: &HashMap<String, IpAddr>) -> Vec<Vec<Feed>> {
-    let mut groups: Vec<(String, Vec<Feed>)> = Vec::new();
-    for feed in feeds {
-        let host = reqwest::Url::parse(&feed.url)
+// Items are grouped by the host of their URL, keeping their order.
+pub fn group_by_host<T>(items: Vec<T>, url: impl Fn(&T) -> &str) -> Vec<Vec<T>> {
+    let mut groups: Vec<(String, Vec<T>)> = Vec::new();
+    for item in items {
+        let host = reqwest::Url::parse(url(&item))
             .ok()
             .and_then(|url| url.host_str().map(str::to_string))
             .unwrap_or_default();
-        let key = addresses.get(&host).map(IpAddr::to_string).unwrap_or(host);
-        match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, group)) => group.push(feed),
-            None => groups.push((key, vec![feed])),
+        match groups.iter_mut().find(|(h, _)| *h == host) {
+            Some((_, group)) => group.push(item),
+            None => groups.push((host, vec![item])),
         }
     }
     groups.into_iter().map(|(_, group)| group).collect()
@@ -795,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn feeds_are_grouped_by_address_then_host() {
+    fn feeds_are_grouped_by_host() {
         let with_url = |pk, url: &str| Feed {
             pk,
             url: url.to_string(),
@@ -807,16 +803,11 @@ mod tests {
             with_url(3, "https://a.example/other"),
             with_url(4, "https://c.example/feed"),
         ];
-        let shared: IpAddr = "192.0.2.1".parse().unwrap();
-        let addresses = HashMap::from([
-            ("a.example".to_string(), shared),
-            ("c.example".to_string(), shared),
-        ]);
-        let groups: Vec<Vec<i64>> = group_by_server(feeds, &addresses)
+        let groups: Vec<Vec<i64>> = group_by_host(feeds, |f| &f.url)
             .into_iter()
             .map(|g| g.into_iter().map(|f| f.pk).collect())
             .collect();
-        assert_eq!(groups, vec![vec![1, 3, 4], vec![2]]);
+        assert_eq!(groups, vec![vec![1, 3], vec![2], vec![4]]);
     }
 
     #[test]

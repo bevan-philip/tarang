@@ -11,6 +11,7 @@ use chrono::Weekday;
 use quick_xml::events::Event;
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
+use futures::stream::{self, StreamExt};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
@@ -116,10 +117,21 @@ pub async fn bulk_feeds(
     client: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
 ) -> FeedResult<HashMap<crate::opml::ImportedFeed, FetchedFeed>> {
-    let results =
-        futures::future::try_join_all(feeds.iter().map(|feed| fetch_feed(client, &feed.url, None)))
-            .await?;
-    Ok(feeds.into_iter().zip(results).collect())
+    // Feeds on one host are fetched one after the other; hosts in parallel.
+    let results: Vec<FeedResult<_>> = stream::iter(poll::group_by_host(feeds, |feed| &feed.url))
+        .map(|group| async move {
+            let mut results = Vec::with_capacity(group.len());
+            for feed in group {
+                let fetched = fetch_feed(client, &feed.url, None).await;
+                results.push(fetched.map(|fetched| (feed, fetched)));
+            }
+            results
+        })
+        .buffer_unordered(8)
+        .flat_map(stream::iter)
+        .collect()
+        .await;
+    results.into_iter().collect()
 }
 
 pub async fn import_opml_feeds(
