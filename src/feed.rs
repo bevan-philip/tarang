@@ -26,6 +26,13 @@ pub enum FeedError {
     Db(#[from] DbError),
 }
 
+impl FeedError {
+    // Every error but a database one comes from the URL or what it served.
+    pub fn is_client_error(&self) -> bool {
+        !matches!(self, FeedError::Db(_))
+    }
+}
+
 pub type FeedResult<T> = Result<T, FeedError>;
 
 pub fn check_url(url: &str) -> FeedResult<()> {
@@ -35,9 +42,10 @@ pub fn check_url(url: &str) -> FeedResult<()> {
             reason,
         })
     };
+    // The url crate always escapes these, so they only appear in pasted text.
     if url
         .chars()
-        .any(|c| c.is_whitespace() || c.is_control() || "\"'<>`{}|\\^".contains(c))
+        .any(|c| c.is_whitespace() || c.is_control() || "\"<>".contains(c))
     {
         return invalid("it contains a space, quote or other character not expected in a URL");
     }
@@ -640,6 +648,7 @@ mod tests {
     fn check_url_accepts_plain_http_urls() {
         assert!(check_url("https://example.org/feed?atom").is_ok());
         assert!(check_url("http://example.org:8080/a/b.xml").is_ok());
+        assert!(check_url("https://example.org/feed?tags=a|b&q='x'^2").is_ok());
     }
 
     #[test]
