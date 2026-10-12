@@ -1,10 +1,8 @@
-use crate::database::{
-    self, Db, DbError, DbResult, Feed, list_feeds_due_for_refresh_at, record_poll,
-};
+use crate::database::{self, Db, DbResult, Feed, list_feeds_due_for_refresh_at, record_poll};
 use crate::feed::log_skipped;
 use crate::filter::{self, CompiledFilter};
 use crate::http;
-use crate::poll::{self, Outcome, Validators};
+use crate::poll::{self, Fetch, Validators};
 use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -91,38 +89,21 @@ async fn poll_feed(
     let response = http::get(client, &feed.url, headers)
         .await
         .map_err(|e| http::describe_error(&e));
-    let redirect = response.as_ref().ok().and_then(|r| r.redirect.clone());
     let outcome = poll::interpret(&response, now);
 
-    if let Outcome::Updated { feed: parsed, .. } = &outcome {
+    if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch {
         log_skipped(&parsed.skipped);
         database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
     }
 
+    let moved_to_taken = match &outcome.moved_to {
+        Some(url) => database::get_feed_by_url(db, url).await?.is_some(),
+        None => false,
+    };
     let newest_article_at = database::newest_article_at(db, feed.pk).await?;
-    let update = poll::next_state(feed, &outcome, redirect.as_ref(), newest_article_at, now);
-    if let Some(moved_to) = &update.moved_to {
-        tracing::warn!(feed = feed.pk, from = %feed.url, to = %moved_to, "feed moved permanently");
-    }
-    match record_poll(db, feed.pk, &update).await {
-        Err(DbError::AlreadyExists(_)) => {
-            let moved_to = update.moved_to.clone().unwrap_or_default();
-            let merged = poll::PollUpdate {
-                disabled: true,
-                moved_to: None,
-                last_error: Some(format!(
-                    "moved permanently to {moved_to}, which another feed already uses"
-                )),
-                ..update
-            };
-            record_poll(db, feed.pk, &merged).await?;
-            Ok(merged.last_error)
-        }
-        result => {
-            result?;
-            Ok(update.last_error)
-        }
-    }
+    let update = poll::next_state(feed, &outcome, moved_to_taken, newest_article_at, now);
+    record_poll(db, feed.pk, &update).await?;
+    Ok(update.last_error)
 }
 
 pub fn unix_now() -> i64 {
