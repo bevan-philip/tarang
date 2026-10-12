@@ -1,10 +1,9 @@
 use reqwest::header::{HeaderMap, LOCATION};
 
 const PROJECT_URL: &str = "https://github.com/bevan-philip/tarang";
-const MAX_REDIRECTS: usize = 10;
 
 // Redirects are followed by `get` rather than reqwest, so that callers can
-// see each hop and act on permanent moves.
+// see the hop and act on permanent moves. Only a single hop is followed.
 pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(user_agent(
@@ -27,7 +26,7 @@ pub struct Response {
     pub url: reqwest::Url,
     pub headers: HeaderMap,
     pub body: Vec<u8>,
-    pub redirects: Vec<Redirect>,
+    pub redirect: Option<Redirect>,
 }
 
 pub async fn get(
@@ -36,7 +35,7 @@ pub async fn get(
     headers: HeaderMap,
 ) -> Result<Response, reqwest::Error> {
     let mut request_url = url.to_string();
-    let mut redirects = Vec::new();
+    let mut redirect = None;
 
     loop {
         let response = client
@@ -55,8 +54,8 @@ pub async fn get(
             .and_then(|loc| url.join(loc).ok());
 
         match next {
-            Some(next) if redirects.len() < MAX_REDIRECTS => {
-                redirects.push(Redirect {
+            Some(next) if redirect.is_none() => {
+                redirect = Some(Redirect {
                     status: status.as_u16(),
                     location: next.to_string(),
                 });
@@ -70,7 +69,7 @@ pub async fn get(
                     url,
                     headers,
                     body,
-                    redirects,
+                    redirect,
                 });
             }
         }
@@ -149,6 +148,45 @@ mod tests {
             .unwrap();
         assert!(accept_encoding.contains("gzip"), "{accept_encoding}");
         assert!(accept_encoding.contains("br"), "{accept_encoding}");
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn get_follows_a_single_redirect() {
+        use axum::{
+            Router,
+            http::{StatusCode, header},
+            routing::get as route,
+        };
+
+        let app = Router::new()
+            .route(
+                "/a",
+                route(|| async { (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, "/b")]) }),
+            )
+            .route(
+                "/b",
+                route(|| async { (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, "/c")]) }),
+            )
+            .route("/c", route(|| async { "feed" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = client_builder().no_proxy().build().unwrap();
+        let response = get(&client, &format!("{base}/a"), HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(response.status, 301);
+        assert_eq!(response.url.as_str(), format!("{base}/b"));
+        assert_eq!(
+            response.redirect,
+            Some(Redirect {
+                status: 301,
+                location: format!("{base}/b"),
+            })
+        );
 
         server.abort();
     }
