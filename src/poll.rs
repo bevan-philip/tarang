@@ -226,35 +226,22 @@ fn is_permanent(redirect: &Redirect) -> bool {
 pub fn after_add(feed: &Feed, validators: Validators, hints: FeedHints, now: i64) -> PollUpdate {
     PollUpdate {
         last_refresh: Some(now),
-        next_poll_at: schedule(
-            feed,
-            &hints,
-            success_interval(feed, &hints, None, None, now),
-            now,
-        ),
+        next_poll_at: schedule(feed, &hints, success_interval(feed, &hints, None), now),
         validators: Some(validators),
         hints: Some(hints),
         ..Default::default()
     }
 }
 
-// Feeds that rarely post are polled less often: a tenth of the time since
-// the newest article, up to a day. Server and feed hints are also capped at
-// a day so that a bad hint cannot stop polls.
-fn success_interval(
-    feed: &Feed,
-    hints: &FeedHints,
-    max_age: Option<i64>,
-    newest_article_at: Option<i64>,
-    now: i64,
-) -> i64 {
-    let quiet = newest_article_at.map_or(0, |newest| ((now - newest) / 10).clamp(0, DAY_SECS));
+// Server and feed hints are capped at a day so that a bad hint cannot stop
+// polls.
+fn success_interval(feed: &Feed, hints: &FeedHints, max_age: Option<i64>) -> i64 {
     let hinted = hints
         .ttl_secs
         .unwrap_or(0)
         .max(max_age.unwrap_or(0))
         .min(DAY_SECS);
-    feed.refresh_interval.max(quiet).max(hinted)
+    feed.refresh_interval.max(hinted)
 }
 
 // A stable per-feed offset spreads feeds that share an interval.
@@ -280,13 +267,7 @@ fn schedule(feed: &Feed, hints: &FeedHints, delay: i64, now: i64) -> i64 {
 
 // `moved_to_taken` is whether another feed already has the URL this feed
 // moved to; the feed is then disabled rather than duplicated.
-pub fn next_state(
-    feed: &Feed,
-    outcome: &Outcome,
-    moved_to_taken: bool,
-    newest_article_at: Option<i64>,
-    now: i64,
-) -> PollUpdate {
+pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64) -> PollUpdate {
     let interval = feed.refresh_interval;
     let base = match &outcome.moved_to {
         Some(moved_to) if moved_to_taken => PollUpdate {
@@ -322,7 +303,7 @@ pub fn next_state(
             feed: parsed,
         } => {
             let hints = parsed.hints.clone();
-            let delay = success_interval(feed, &hints, *max_age, newest_article_at, now);
+            let delay = success_interval(feed, &hints, *max_age);
             PollUpdate {
                 last_refresh: Some(now),
                 next_poll_at: schedule(feed, &hints, delay, now),
@@ -333,7 +314,7 @@ pub fn next_state(
         }
         Fetch::NotModified { max_age } => {
             let hints = FeedHints::of(feed);
-            let delay = success_interval(feed, &hints, *max_age, newest_article_at, now);
+            let delay = success_interval(feed, &hints, *max_age);
             PollUpdate {
                 last_refresh: Some(now),
                 next_poll_at: schedule(feed, &hints, delay, now),
@@ -554,7 +535,7 @@ mod tests {
             feed: parse_feed(RSS.as_bytes(), "https://example.com/feed").unwrap(),
         }
         .into();
-        let update = next_state(&feed(3), &outcome, false, None, NOW);
+        let update = next_state(&feed(3), &outcome, false, NOW);
         assert_eq!(
             update,
             PollUpdate {
@@ -573,7 +554,6 @@ mod tests {
             &feed(0),
             &Fetch::NotModified { max_age: None }.into(),
             false,
-            None,
             NOW,
         );
         assert_eq!(update.validators, None);
@@ -584,17 +564,17 @@ mod tests {
     #[test]
     fn failures_back_off_exponentially_and_never_speed_up() {
         let error = Fetch::RequestError("connection refused".to_string()).into();
-        let first = next_state(&feed(0), &error, false, None, NOW);
+        let first = next_state(&feed(0), &error, false, NOW);
         assert_eq!(first.next_poll_at, NOW + 7200 + jitter(1, 7200));
         assert_eq!(first.failure_count, 1);
         assert_eq!(first.last_error.as_deref(), Some("connection refused"));
         assert_eq!(first.last_refresh, None);
         assert_eq!(first.validators, None);
 
-        let third = next_state(&feed(2), &error, false, None, NOW);
+        let third = next_state(&feed(2), &error, false, NOW);
         assert_eq!(third.next_poll_at, NOW + 3600 * 8 + jitter(1, 3600 * 8));
 
-        let capped = next_state(&feed(8), &error, false, None, NOW);
+        let capped = next_state(&feed(8), &error, false, NOW);
         assert_eq!(
             capped.next_poll_at,
             NOW + MAX_BACKOFF_SECS + jitter(1, MAX_BACKOFF_SECS)
@@ -604,35 +584,35 @@ mod tests {
     #[test]
     fn repeated_failures_disable_the_feed() {
         let error = http_error(404, None);
-        assert!(!next_state(&feed(MAX_FAILURES - 2), &error, false, None, NOW).disabled);
-        assert!(next_state(&feed(MAX_FAILURES - 1), &error, false, None, NOW).disabled);
+        assert!(!next_state(&feed(MAX_FAILURES - 2), &error, false, NOW).disabled);
+        assert!(next_state(&feed(MAX_FAILURES - 1), &error, false, NOW).disabled);
 
         let not_a_feed = Fetch::NotAFeed("bad xml".to_string()).into();
-        assert!(next_state(&feed(MAX_FAILURES - 1), &not_a_feed, false, None, NOW).disabled);
+        assert!(next_state(&feed(MAX_FAILURES - 1), &not_a_feed, false, NOW).disabled);
     }
 
     #[test]
     fn gone_disables_immediately() {
-        let update = next_state(&feed(0), &http_error(410, None), false, None, NOW);
+        let update = next_state(&feed(0), &http_error(410, None), false, NOW);
         assert!(update.disabled);
         assert_eq!(update.last_error.as_deref(), Some("HTTP 410"));
     }
 
     #[test]
     fn too_many_requests_honours_retry_after_and_never_disables() {
-        let update = next_state(&feed(0), &http_error(429, Some(86400)), false, None, NOW);
+        let update = next_state(&feed(0), &http_error(429, Some(86400)), false, NOW);
         assert_eq!(update.next_poll_at, NOW + 86400 + jitter(1, 86400));
         assert_eq!(update.validators, None);
 
-        let no_hint = next_state(&feed(0), &http_error(429, None), false, None, NOW);
+        let no_hint = next_state(&feed(0), &http_error(429, None), false, NOW);
         assert_eq!(no_hint.next_poll_at, NOW + 7200 + jitter(1, 7200));
 
-        assert!(!next_state(&feed(50), &http_error(429, None), false, None, NOW).disabled);
+        assert!(!next_state(&feed(50), &http_error(429, None), false, NOW).disabled);
     }
 
     #[test]
     fn short_retry_after_does_not_speed_up_polling() {
-        let update = next_state(&feed(0), &http_error(503, Some(5)), false, None, NOW);
+        let update = next_state(&feed(0), &http_error(503, Some(5)), false, NOW);
         assert_eq!(update.next_poll_at, NOW + 7200 + jitter(1, 7200));
     }
 
@@ -643,7 +623,7 @@ mod tests {
             assert_eq!(outcome.moved_to.as_deref(), Some("https://a.example/feed"));
             assert_eq!(outcome.redirected_to, None);
 
-            let update = next_state(&feed(0), &outcome, false, None, NOW);
+            let update = next_state(&feed(0), &outcome, false, NOW);
             assert_eq!(update.moved_to.as_deref(), Some("https://a.example/feed"));
             assert_eq!(update.redirected_to, None);
             assert!(!update.disabled);
@@ -656,7 +636,7 @@ mod tests {
             let outcome = redirected(status, "https://a.example/feed");
             assert_eq!(outcome.moved_to, None);
 
-            let update = next_state(&feed(0), &outcome, false, None, NOW);
+            let update = next_state(&feed(0), &outcome, false, NOW);
             assert_eq!(update.moved_to, None);
             assert_eq!(
                 update.redirected_to.as_deref(),
@@ -671,7 +651,6 @@ mod tests {
             &feed(0),
             &Fetch::NotModified { max_age: None }.into(),
             false,
-            None,
             NOW,
         );
         assert_eq!(update.moved_to, None);
@@ -687,33 +666,21 @@ mod tests {
     }
 
     #[test]
-    fn hints_and_quiet_feeds_lengthen_the_interval() {
+    fn hints_lengthen_the_interval() {
         let f = feed(0);
         let none = FeedHints::default();
-        assert_eq!(success_interval(&f, &none, None, None, NOW), 3600);
-        assert_eq!(success_interval(&f, &none, Some(7200), None, NOW), 7200);
+        assert_eq!(success_interval(&f, &none, None), 3600);
+        assert_eq!(success_interval(&f, &none, Some(7200)), 7200);
+        assert_eq!(success_interval(&f, &none, Some(60)), 3600);
 
         let ttl = FeedHints {
             ttl_secs: Some(3 * 3600),
             ..Default::default()
         };
-        assert_eq!(success_interval(&f, &ttl, Some(7200), None, NOW), 3 * 3600);
+        assert_eq!(success_interval(&f, &ttl, Some(7200)), 3 * 3600);
 
-        // Newest article 10 hours old: a tenth of that is under the base.
-        assert_eq!(
-            success_interval(&f, &none, None, Some(NOW - 36_000), NOW),
-            3600
-        );
-        // Newest article 5 days old: half a day.
-        assert_eq!(
-            success_interval(&f, &none, None, Some(NOW - 5 * DAY_SECS), NOW),
-            DAY_SECS / 2
-        );
-        // Very old feeds and huge hints are capped at a day.
-        assert_eq!(
-            success_interval(&f, &none, Some(365 * DAY_SECS), Some(0), NOW),
-            DAY_SECS
-        );
+        // Huge hints are capped at a day.
+        assert_eq!(success_interval(&f, &none, Some(365 * DAY_SECS)), DAY_SECS);
     }
 
     #[test]
@@ -809,7 +776,7 @@ mod tests {
     #[test]
     fn moving_onto_another_feeds_url_disables_this_feed() {
         let outcome = redirected(301, "https://a.example/feed");
-        let update = next_state(&feed(0), &outcome, true, None, NOW);
+        let update = next_state(&feed(0), &outcome, true, NOW);
         assert!(update.disabled);
         assert_eq!(update.moved_to, None);
         assert_eq!(
@@ -819,7 +786,7 @@ mod tests {
 
         let mut failed = http_error(500, None);
         failed.moved_to = Some("https://a.example/feed".to_string());
-        let update = next_state(&feed(0), &failed, true, None, NOW);
+        let update = next_state(&feed(0), &failed, true, NOW);
         assert!(update.disabled);
         assert!(update.last_error.unwrap().contains("another feed"));
     }

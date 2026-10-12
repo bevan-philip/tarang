@@ -200,17 +200,6 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
     Ok(())
 }
 
-pub async fn newest_article_at(db: &Db, feed_pk: i64) -> DbResult<Option<i64>> {
-    let newest = sqlx::query_scalar!(
-        r#"SELECT MAX(published_at) as "newest: i64" FROM article WHERE feed = ?"#,
-        feed_pk
-    )
-    .fetch_one(&db.read)
-    .await?;
-
-    Ok(newest)
-}
-
 pub async fn set_feed_disabled(db: &Db, pk: i64, disabled: bool) -> DbResult<()> {
     sqlx::query!(
         r#"UPDATE feed

@@ -100,8 +100,7 @@ async fn poll_feed(
         Some(url) => database::get_feed_by_url(db, url).await?.is_some(),
         None => false,
     };
-    let newest_article_at = database::newest_article_at(db, feed.pk).await?;
-    let update = poll::next_state(feed, &outcome, moved_to_taken, newest_article_at, now);
+    let update = poll::next_state(feed, &outcome, moved_to_taken, now);
     record_poll(db, feed.pk, &update).await?;
     Ok(update.last_error)
 }
