@@ -85,14 +85,29 @@ pub fn interpret(response: &Result<Response, String>, now: i64) -> Outcome {
         Ok(response) => response,
         Err(message) => return Fetch::RequestError(message.clone()).into(),
     };
-    let (moved, redirected): (Vec<_>, Vec<_>) =
-        response.redirect.iter().partition(|r| is_permanent(r));
-
     Outcome {
         fetch: fetch(response, now),
-        moved_to: moved.first().map(|r| r.location.clone()),
-        redirected_to: redirected.first().map(|r| r.location.clone()),
+        moved_to: permanent_target(&response.redirects),
+        redirected_to: temporary_target(&response.redirects),
     }
+}
+
+// The leading run of 301/308 hops is a permanent move; anything after a
+// temporary hop is not.
+fn permanent_target(redirects: &[Redirect]) -> Option<String> {
+    redirects
+        .iter()
+        .take_while(|r| is_permanent(r))
+        .last()
+        .map(|r| r.location.clone())
+}
+
+fn temporary_target(redirects: &[Redirect]) -> Option<String> {
+    redirects
+        .iter()
+        .any(|r| !is_permanent(r))
+        .then(|| redirects.last().map(|r| r.location.clone()))
+        .flatten()
 }
 
 fn fetch(response: &Response, now: i64) -> Fetch {
@@ -168,48 +183,51 @@ pub fn after_add(feed: &Feed, validators: Validators, now: i64) -> PollUpdate {
 }
 
 // `moved_to_taken` is whether another feed already has the URL this feed
-// moved to; the feed is then disabled rather than duplicated.
+// moved to; the feed is then disabled rather than duplicated. A move is only
+// followed once the new URL has served the feed.
 pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64) -> PollUpdate {
     let interval = feed.refresh_interval;
-    let base = match &outcome.moved_to {
-        Some(moved_to) if moved_to_taken => PollUpdate {
-            disabled: true,
-            last_error: Some(format!(
-                "moved permanently to {moved_to}, which another feed already uses"
-            )),
-            ..Default::default()
-        },
-        moved_to => PollUpdate {
-            moved_to: moved_to.clone(),
-            redirected_to: outcome.redirected_to.clone(),
-            ..Default::default()
-        },
+    let moved_to = outcome.moved_to.clone().filter(|url| *url != feed.url);
+    let base = PollUpdate {
+        redirected_to: outcome.redirected_to.clone(),
+        ..Default::default()
+    };
+
+    let success = |validators: Option<Validators>| {
+        let update = PollUpdate {
+            last_refresh: Some(now),
+            next_poll_at: now + interval,
+            validators,
+            ..base.clone()
+        };
+        match moved_to.clone() {
+            Some(moved_to) if moved_to_taken => PollUpdate {
+                disabled: true,
+                last_error: Some(format!(
+                    "moved permanently to {moved_to}, which another feed already uses"
+                )),
+                ..update
+            },
+            moved_to => PollUpdate { moved_to, ..update },
+        }
     };
 
     let failure = |message: String, retry_after: Option<i64>, may_disable: bool| {
         let failure_count = feed.failure_count + 1;
-        let delay = backoff(interval, failure_count).max(retry_after.unwrap_or(0));
+        let retry_after = retry_after.unwrap_or(0).min(MAX_BACKOFF_SECS);
+        let delay = backoff(interval, failure_count).max(retry_after);
         PollUpdate {
             next_poll_at: now + delay,
             failure_count,
-            disabled: base.disabled || (may_disable && failure_count >= MAX_FAILURES),
-            last_error: base.last_error.clone().or(Some(message)),
+            disabled: may_disable && failure_count >= MAX_FAILURES,
+            last_error: Some(message),
             ..base.clone()
         }
     };
 
     match &outcome.fetch {
-        Fetch::Updated { validators, .. } => PollUpdate {
-            last_refresh: Some(now),
-            next_poll_at: now + interval,
-            validators: Some(validators.clone()),
-            ..base
-        },
-        Fetch::NotModified => PollUpdate {
-            last_refresh: Some(now),
-            next_poll_at: now + interval,
-            ..base
-        },
+        Fetch::Updated { validators, .. } => success(Some(validators.clone())),
+        Fetch::NotModified => success(None),
         Fetch::NotAFeed(message) => failure(format!("not a feed: {message}"), None, true),
         Fetch::HttpError {
             status: 410, body, ..
@@ -280,7 +298,7 @@ mod tests {
             url: reqwest::Url::parse("https://example.com/feed").unwrap(),
             headers: map,
             body: body.as_bytes().to_vec(),
-            redirect: None,
+            redirects: vec![],
         })
     }
 
@@ -295,12 +313,15 @@ mod tests {
         .into()
     }
 
-    fn redirected(status: u16, location: &str) -> Outcome {
+    fn redirected(hops: &[(u16, &str)]) -> Outcome {
         let mut response = response(304, &[], "");
-        response.as_mut().unwrap().redirect = Some(Redirect {
-            status,
-            location: location.to_string(),
-        });
+        response.as_mut().unwrap().redirects = hops
+            .iter()
+            .map(|(status, location)| Redirect {
+                status: *status,
+                location: location.to_string(),
+            })
+            .collect();
         interpret(&response, NOW)
     }
 
@@ -478,7 +499,7 @@ mod tests {
     #[test]
     fn permanent_redirect_moves_the_feed() {
         for status in [301, 308] {
-            let outcome = redirected(status, "https://a.example/feed");
+            let outcome = redirected(&[(status, "https://a.example/feed")]);
             assert_eq!(outcome.moved_to.as_deref(), Some("https://a.example/feed"));
             assert_eq!(outcome.redirected_to, None);
 
@@ -492,7 +513,7 @@ mod tests {
     #[test]
     fn temporary_redirect_does_not_move_the_feed() {
         for status in [302, 303, 307] {
-            let outcome = redirected(status, "https://a.example/feed");
+            let outcome = redirected(&[(status, "https://a.example/feed")]);
             assert_eq!(outcome.moved_to, None);
 
             let update = next_state(&feed(0), &outcome, false, NOW);
@@ -505,6 +526,33 @@ mod tests {
     }
 
     #[test]
+    fn leading_permanent_redirects_move_the_feed() {
+        let outcome = redirected(&[
+            (301, "https://a.example/feed"),
+            (308, "https://b.example/feed"),
+            (302, "https://c.example/feed"),
+        ]);
+        assert_eq!(outcome.moved_to.as_deref(), Some("https://b.example/feed"));
+        assert_eq!(
+            outcome.redirected_to.as_deref(),
+            Some("https://c.example/feed")
+        );
+    }
+
+    #[test]
+    fn temporary_redirect_first_does_not_move_the_feed() {
+        let outcome = redirected(&[
+            (302, "https://a.example/feed"),
+            (301, "https://b.example/feed"),
+        ]);
+        assert_eq!(outcome.moved_to, None);
+        assert_eq!(
+            outcome.redirected_to.as_deref(),
+            Some("https://b.example/feed")
+        );
+    }
+
+    #[test]
     fn no_redirect_clears_redirected_to() {
         let update = next_state(&feed(0), &Fetch::NotModified.into(), false, NOW);
         assert_eq!(update.moved_to, None);
@@ -512,8 +560,35 @@ mod tests {
     }
 
     #[test]
+    fn redirect_to_its_own_url_is_not_a_move() {
+        let outcome = redirected(&[(301, "https://example.com/feed")]);
+        let update = next_state(&feed(0), &outcome, true, NOW);
+        assert_eq!(update.moved_to, None);
+        assert!(!update.disabled);
+    }
+
+    #[test]
+    fn failed_fetch_after_a_permanent_redirect_does_not_move() {
+        let mut failed = http_error(404, None);
+        failed.moved_to = Some("https://a.example/feed".to_string());
+        let update = next_state(&feed(0), &failed, false, NOW);
+        assert_eq!(update.moved_to, None);
+        assert_eq!(update.last_error.as_deref(), Some("HTTP 404"));
+
+        let update = next_state(&feed(0), &failed, true, NOW);
+        assert_eq!(update.moved_to, None);
+        assert!(!update.disabled);
+    }
+
+    #[test]
+    fn huge_retry_after_is_capped() {
+        let update = next_state(&feed(0), &http_error(429, Some(i64::MAX)), false, NOW);
+        assert_eq!(update.next_poll_at, NOW + MAX_BACKOFF_SECS);
+    }
+
+    #[test]
     fn moving_onto_another_feeds_url_disables_this_feed() {
-        let outcome = redirected(301, "https://a.example/feed");
+        let outcome = redirected(&[(301, "https://a.example/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
         assert!(update.disabled);
         assert_eq!(update.moved_to, None);
@@ -521,11 +596,5 @@ mod tests {
             update.last_error.as_deref(),
             Some("moved permanently to https://a.example/feed, which another feed already uses")
         );
-
-        let mut failed = http_error(500, None);
-        failed.moved_to = Some("https://a.example/feed".to_string());
-        let update = next_state(&feed(0), &failed, true, NOW);
-        assert!(update.disabled);
-        assert!(update.last_error.unwrap().contains("another feed"));
     }
 }
