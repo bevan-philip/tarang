@@ -85,14 +85,29 @@ pub fn interpret(response: &Result<Response, String>, now: i64) -> Outcome {
         Ok(response) => response,
         Err(message) => return Fetch::RequestError(message.clone()).into(),
     };
-    let (moved, redirected): (Vec<_>, Vec<_>) =
-        response.redirect.iter().partition(|r| is_permanent(r));
-
     Outcome {
         fetch: fetch(response, now),
-        moved_to: moved.first().map(|r| r.location.clone()),
-        redirected_to: redirected.first().map(|r| r.location.clone()),
+        moved_to: permanent_target(&response.redirects),
+        redirected_to: temporary_target(&response.redirects),
     }
+}
+
+// The leading run of 301/308 hops is a permanent move; anything after a
+// temporary hop is not.
+fn permanent_target(redirects: &[Redirect]) -> Option<String> {
+    redirects
+        .iter()
+        .take_while(|r| is_permanent(r))
+        .last()
+        .map(|r| r.location.clone())
+}
+
+fn temporary_target(redirects: &[Redirect]) -> Option<String> {
+    redirects
+        .iter()
+        .any(|r| !is_permanent(r))
+        .then(|| redirects.last().map(|r| r.location.clone()))
+        .flatten()
 }
 
 fn fetch(response: &Response, now: i64) -> Fetch {
@@ -267,7 +282,7 @@ mod tests {
             url: reqwest::Url::parse("https://example.com/feed").unwrap(),
             headers: map,
             body: body.as_bytes().to_vec(),
-            redirect: None,
+            redirects: vec![],
         })
     }
 
@@ -282,12 +297,15 @@ mod tests {
         .into()
     }
 
-    fn redirected(status: u16, location: &str) -> Outcome {
+    fn redirected(hops: &[(u16, &str)]) -> Outcome {
         let mut response = response(304, &[], "");
-        response.as_mut().unwrap().redirect = Some(Redirect {
-            status,
-            location: location.to_string(),
-        });
+        response.as_mut().unwrap().redirects = hops
+            .iter()
+            .map(|(status, location)| Redirect {
+                status: *status,
+                location: location.to_string(),
+            })
+            .collect();
         interpret(&response, NOW)
     }
 
@@ -465,7 +483,7 @@ mod tests {
     #[test]
     fn permanent_redirect_moves_the_feed() {
         for status in [301, 308] {
-            let outcome = redirected(status, "https://a.example/feed");
+            let outcome = redirected(&[(status, "https://a.example/feed")]);
             assert_eq!(outcome.moved_to.as_deref(), Some("https://a.example/feed"));
             assert_eq!(outcome.redirected_to, None);
 
@@ -479,7 +497,7 @@ mod tests {
     #[test]
     fn temporary_redirect_does_not_move_the_feed() {
         for status in [302, 303, 307] {
-            let outcome = redirected(status, "https://a.example/feed");
+            let outcome = redirected(&[(status, "https://a.example/feed")]);
             assert_eq!(outcome.moved_to, None);
 
             let update = next_state(&feed(0), &outcome, false, NOW);
@@ -492,6 +510,33 @@ mod tests {
     }
 
     #[test]
+    fn leading_permanent_redirects_move_the_feed() {
+        let outcome = redirected(&[
+            (301, "https://a.example/feed"),
+            (308, "https://b.example/feed"),
+            (302, "https://c.example/feed"),
+        ]);
+        assert_eq!(outcome.moved_to.as_deref(), Some("https://b.example/feed"));
+        assert_eq!(
+            outcome.redirected_to.as_deref(),
+            Some("https://c.example/feed")
+        );
+    }
+
+    #[test]
+    fn temporary_redirect_first_does_not_move_the_feed() {
+        let outcome = redirected(&[
+            (302, "https://a.example/feed"),
+            (301, "https://b.example/feed"),
+        ]);
+        assert_eq!(outcome.moved_to, None);
+        assert_eq!(
+            outcome.redirected_to.as_deref(),
+            Some("https://b.example/feed")
+        );
+    }
+
+    #[test]
     fn no_redirect_clears_redirected_to() {
         let update = next_state(&feed(0), &Fetch::NotModified.into(), false, NOW);
         assert_eq!(update.moved_to, None);
@@ -500,7 +545,7 @@ mod tests {
 
     #[test]
     fn moving_onto_another_feeds_url_disables_this_feed() {
-        let outcome = redirected(301, "https://a.example/feed");
+        let outcome = redirected(&[(301, "https://a.example/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
         assert!(update.disabled);
         assert_eq!(update.moved_to, None);
