@@ -3052,6 +3052,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "opml",
+ "quick-xml",
  "regex",
  "reqwest",
  "schemars 0.9.0",
