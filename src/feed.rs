@@ -6,9 +6,12 @@ use crate::database::DbError;
 use crate::database::ParsedArticle;
 use crate::filter;
 use crate::http;
-use crate::poll::{self, Validators};
+use crate::poll::{self, FeedHints, Validators};
+use chrono::Weekday;
+use quick_xml::events::Event;
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
+use futures::stream::{self, StreamExt};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
@@ -98,7 +101,12 @@ pub async fn create_feed_with_articles(
     database::record_poll(
         db,
         feed.pk,
-        &poll::after_add(&feed, fetched.validators, crate::sync::unix_now()),
+        &poll::after_add(
+            &feed,
+            fetched.validators,
+            fetched.hints,
+            crate::sync::unix_now(),
+        ),
     )
     .await?;
 
@@ -109,10 +117,21 @@ pub async fn bulk_feeds(
     client: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
 ) -> FeedResult<HashMap<crate::opml::ImportedFeed, FetchedFeed>> {
-    let results =
-        futures::future::try_join_all(feeds.iter().map(|feed| fetch_feed(client, &feed.url, None)))
-            .await?;
-    Ok(feeds.into_iter().zip(results).collect())
+    // Feeds on one host are fetched one after the other; hosts in parallel.
+    let results: Vec<FeedResult<_>> = stream::iter(poll::group_by_host(feeds, |feed| &feed.url))
+        .map(|group| async move {
+            let mut results = Vec::with_capacity(group.len());
+            for feed in group {
+                let fetched = fetch_feed(client, &feed.url, None).await;
+                results.push(fetched.map(|fetched| (feed, fetched)));
+            }
+            results
+        })
+        .buffer_unordered(8)
+        .flat_map(stream::iter)
+        .collect()
+        .await;
+    results.into_iter().collect()
 }
 
 pub async fn import_opml_feeds(
@@ -161,7 +180,12 @@ pub async fn import_opml_feeds(
         database::record_poll(
             db,
             db_feed.pk,
-            &poll::after_add(&db_feed, fetched.validators, crate::sync::unix_now()),
+            &poll::after_add(
+                &db_feed,
+                fetched.validators,
+                fetched.hints,
+                crate::sync::unix_now(),
+            ),
         )
         .await?;
     }
@@ -180,6 +204,7 @@ pub struct ParsedFeedResult {
     pub link: String,
     pub articles: Vec<ParsedArticle>,
     pub skipped: Vec<SkipReason>,
+    pub hints: FeedHints,
 }
 
 // feed-rs defaults an Atom <link>'s rel to "alternate" only when the XML
@@ -207,12 +232,77 @@ pub fn parse_feed(bytes: &[u8], base_uri: &str) -> Result<ParsedFeedResult, Feed
         .parse(bytes)?;
     let title = feed.title.as_ref().map(|t| t.content.clone());
     let link = select_display_link(&feed.links).ok_or(FeedError::MissingLink)?;
+    let hints = parse_hints(bytes, feed.ttl);
     let (articles, skipped) = process_feed(feed);
     Ok(ParsedFeedResult {
         title,
         link,
         articles,
         skipped,
+        hints,
+    })
+}
+
+// feed-rs exposes RSS <ttl> but not <skipHours>/<skipDays>, so those are
+// read with an XML parser. Per RSS 2.0, only rss/channel/skipHours/hour
+// (0-23, GMT) and rss/channel/skipDays/day (Monday-Sunday) count.
+fn parse_hints(bytes: &[u8], ttl_minutes: Option<u32>) -> FeedHints {
+    let mut hints = FeedHints {
+        ttl_secs: ttl_minutes.map(|m| i64::from(m) * 60),
+        ..Default::default()
+    };
+    let mut reader = quick_xml::Reader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+    let mut path: Vec<Vec<u8>> = Vec::new();
+
+    loop {
+        let text = match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                path.push(e.name().as_ref().to_vec());
+                continue;
+            }
+            Ok(Event::End(_)) => {
+                path.pop();
+                continue;
+            }
+            Ok(Event::Text(t)) => t.decode().ok().map(|t| t.into_owned()),
+            Ok(Event::CData(t)) => t.decode().ok().map(|t| t.into_owned()),
+            Ok(Event::Eof) | Err(_) => break,
+            Ok(_) => continue,
+        };
+        let Some(text) = text else { continue };
+        match path
+            .iter()
+            .map(Vec::as_slice)
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            [b"rss", b"channel", b"skipHours", b"hour"] => {
+                if let Some(hour) = text.trim().parse().ok().filter(|h| *h <= 23) {
+                    hints.skip_hours.push(hour);
+                }
+            }
+            [b"rss", b"channel", b"skipDays", b"day"] => {
+                if let Some(day) = rss_weekday(text.trim()) {
+                    hints.skip_days.push(day);
+                }
+            }
+            _ => {}
+        }
+    }
+    hints
+}
+
+fn rss_weekday(name: &str) -> Option<Weekday> {
+    Some(match name {
+        "Monday" => Weekday::Mon,
+        "Tuesday" => Weekday::Tue,
+        "Wednesday" => Weekday::Wed,
+        "Thursday" => Weekday::Thu,
+        "Friday" => Weekday::Fri,
+        "Saturday" => Weekday::Sat,
+        "Sunday" => Weekday::Sun,
+        _ => return None,
     })
 }
 
@@ -221,6 +311,7 @@ pub struct FetchedFeed {
     pub link: String,
     pub articles: Vec<ParsedArticle>,
     pub validators: Validators,
+    pub hints: FeedHints,
 }
 
 pub async fn fetch_feed(
@@ -243,6 +334,7 @@ pub async fn fetch_feed(
         link,
         articles,
         skipped,
+        hints,
     } = parse_feed(&response.body, response.url.as_str())?;
     log_skipped(&skipped);
     Ok(FetchedFeed {
@@ -250,6 +342,7 @@ pub async fn fetch_feed(
         link,
         articles,
         validators: Validators::from_headers(&response.headers),
+        hints,
     })
 }
 
@@ -729,5 +822,55 @@ mod tests {
         assert!(stored.last_refresh.is_some());
 
         server.abort();
+    }
+
+    #[test]
+    fn rss_poll_hints_are_parsed() {
+        let xml = r#"<rss version="2.0"><channel>
+            <title>Feed</title>
+            <link>https://example.com</link>
+            <ttl>90</ttl>
+            <skipHours><hour>0</hour><hour> 7 </hour><hour><![CDATA[23]]></hour></skipHours>
+            <skipDays><day>Saturday</day><day>Sunday</day></skipDays>
+        </channel></rss>"#;
+        let hints = parse_feed(xml.as_bytes(), BASE_URI).unwrap().hints;
+        assert_eq!(hints.ttl_secs, Some(90 * 60));
+        assert_eq!(hints.skip_hours, vec![0, 7, 23]);
+        assert_eq!(hints.skip_days, vec![Weekday::Sat, Weekday::Sun]);
+
+        let none = parse_feed(RSS_HAPPY_PATH.as_bytes(), BASE_URI)
+            .unwrap()
+            .hints;
+        assert_eq!(none, FeedHints::default());
+    }
+
+    #[test]
+    fn skip_values_outside_the_rss_spec_are_ignored() {
+        let xml = r#"<rss version="2.0"><channel>
+            <title>Feed</title>
+            <link>https://example.com</link>
+            <skipHours><hour>24</hour><hour>-1</hour><hour>x</hour><hour>5</hour></skipHours>
+            <skipDays><day>Mon</day><day>monday</day><day>Funday</day><day>Friday</day></skipDays>
+        </channel></rss>"#;
+        let hints = parse_hints(xml.as_bytes(), None);
+        assert_eq!(hints.skip_hours, vec![5]);
+        assert_eq!(hints.skip_days, vec![Weekday::Fri]);
+    }
+
+    #[test]
+    fn skip_elements_outside_the_channel_are_ignored() {
+        let xml = r#"<rss version="2.0"><channel>
+            <title>Feed</title>
+            <link>https://example.com</link>
+            <!-- <skipHours><hour>1</hour></skipHours> -->
+            <item>
+                <title>About RSS</title>
+                <link>https://example.com/rss</link>
+                <description><![CDATA[Use <skipHours><hour>2</hour></skipHours> like this.]]></description>
+                <skipDays><day>Monday</day></skipDays>
+            </item>
+            <x:skipHours xmlns:x="urn:x"><x:hour>3</x:hour></x:skipHours>
+        </channel></rss>"#;
+        assert_eq!(parse_hints(xml.as_bytes(), None), FeedHints::default());
     }
 }

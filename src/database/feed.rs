@@ -25,6 +25,12 @@ pub struct Feed {
     pub last_error: Option<String>,
     pub moved_from: Option<String>,
     pub redirected_to: Option<String>,
+    #[serde(skip)]
+    pub ttl_secs: Option<i64>,
+    #[serde(skip)]
+    pub skip_hours: String,
+    #[serde(skip)]
+    pub skip_days: String,
 }
 
 impl Feed {
@@ -58,7 +64,7 @@ pub async fn create_feed(
         Feed,
         r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to"#,
+           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
         name,
         url,
         display_url,
@@ -76,7 +82,7 @@ pub async fn create_feed(
 pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE pk = ?"#,
         pk,
     )
@@ -89,7 +95,7 @@ pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
 pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE url = ?"#,
         url,
     )
@@ -103,7 +109,7 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
     let visible_only = scope.visible_only();
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name"#,
         visible_only,
     )
@@ -116,7 +122,7 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
 pub async fn list_feeds_due_for_refresh_at(db: &Db, now: i64) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed
            WHERE disabled = 0 AND (next_poll_at IS NULL OR next_poll_at <= ?)"#,
         now,
@@ -149,6 +155,10 @@ pub async fn update_feed_last_refresh(
 pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> DbResult<()> {
     let validators_provided = update.validators.is_some();
     let validators = update.validators.clone().unwrap_or_default();
+    let hints_provided = update.hints.is_some();
+    let hints = update.hints.clone().unwrap_or_default();
+    let skip_hours = hints.skip_hours_text();
+    let skip_days = hints.skip_days_text();
     sqlx::query!(
         r#"UPDATE feed
            SET last_refresh = COALESCE(?, last_refresh),
@@ -160,7 +170,10 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
                last_modified = CASE WHEN ? THEN ? ELSE last_modified END,
                moved_from = CASE WHEN ? IS NOT NULL THEN url ELSE moved_from END,
                url = COALESCE(?, url),
-               redirected_to = ?
+               redirected_to = ?,
+               ttl_secs = CASE WHEN ? THEN ? ELSE ttl_secs END,
+               skip_hours = CASE WHEN ? THEN ? ELSE skip_hours END,
+               skip_days = CASE WHEN ? THEN ? ELSE skip_days END
            WHERE pk = ?"#,
         update.last_refresh,
         update.next_poll_at,
@@ -174,6 +187,12 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
         update.moved_to,
         update.moved_to,
         update.redirected_to,
+        hints_provided,
+        hints.ttl_secs,
+        hints_provided,
+        skip_hours,
+        hints_provided,
+        skip_days,
         pk,
     )
     .execute(&db.write)
@@ -224,7 +243,7 @@ pub async fn update_feed(
                category = CASE WHEN ? THEN ? ELSE category END,
                greader_hidden = COALESCE(?, greader_hidden)
            WHERE pk = ?
-           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to"#,
+           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
         name,
         display_url,
         metadata,
@@ -284,6 +303,9 @@ mod tests {
             last_error: None,
             moved_from: None,
             redirected_to: None,
+            ttl_secs: None,
+            skip_hours: String::new(),
+            skip_days: String::new(),
         }
     }
 
