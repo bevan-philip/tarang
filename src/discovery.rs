@@ -110,24 +110,15 @@ pub async fn resolve_feed_url(
         return Ok(feed_url);
     }
 
-    let response = http
-        .get(url)
-        .send()
+    let response = crate::http::get(http, url, Default::default())
         .await
         .map_err(|source| DiscoveryError::Fetch {
             url: url.to_string(),
             source,
         })?;
-    let final_url = response.url().clone();
-    let body = response
-        .text()
-        .await
-        .map_err(|source| DiscoveryError::Fetch {
-            url: url.to_string(),
-            source,
-        })?;
+    let body = String::from_utf8_lossy(&response.body);
 
-    resolve_from_fetched_page(url, &final_url, &body, config)
+    resolve_from_fetched_page(url, &response.url, &body, config)
 }
 
 #[cfg(test)]

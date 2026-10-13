@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET disabled = ?,\n               failure_count = CASE WHEN ? THEN failure_count ELSE 0 END,\n               next_poll_at = CASE WHEN ? THEN next_poll_at ELSE NULL END\n           WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "92fbfc820df4ebc382d6e97d3594c37ff650dc02b500a2591fa8ca110106cb3f"
+}

@@ -1,0 +1,218 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               display_url = COALESCE(?, display_url),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval),\n               category = CASE WHEN ? THEN ? ELSE category END,\n               greader_hidden = COALESCE(?, greader_hidden)\n           WHERE pk = ?\n           RETURNING pk, name, url, display_url, category as \"category: Option<i64>\", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "pk"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "display_url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "display_url"
+          }
+        }
+      },
+      {
+        "name": "category: Option<i64>",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "name": "metadata",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "name": "refresh_interval",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "refresh_interval"
+          }
+        }
+      },
+      {
+        "name": "last_refresh",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_refresh"
+          }
+        }
+      },
+      {
+        "name": "next_poll_at",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "next_poll_at"
+          }
+        }
+      },
+      {
+        "name": "greader_hidden: bool",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "greader_hidden"
+          }
+        }
+      },
+      {
+        "name": "etag",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "name": "last_modified",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_modified"
+          }
+        }
+      },
+      {
+        "name": "failure_count",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "failure_count"
+          }
+        }
+      },
+      {
+        "name": "disabled: bool",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "disabled"
+          }
+        }
+      },
+      {
+        "name": "last_error",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "name": "moved_from",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "moved_from"
+          }
+        }
+      },
+      {
+        "name": "redirected_to",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "feed",
+            "name": "redirected_to"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f661a91eb70cedc3ab843e3da9fe90fda3c162994fab348677b5eff46b5db250"
+}

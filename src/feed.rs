@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
 use crate::database;
-use crate::database::Article;
 use crate::database::Db;
 use crate::database::DbError;
 use crate::database::ParsedArticle;
-use crate::filter::{self, CompiledFilter};
+use crate::filter;
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
 
@@ -22,19 +21,6 @@ pub enum FeedError {
 }
 
 pub type FeedResult<T> = Result<T, FeedError>;
-
-pub async fn update_feed_articles(
-    db: &Db,
-    feed_pk: i64,
-    feed_url: &str,
-    client: &reqwest::Client,
-    filters: &[CompiledFilter],
-) -> FeedResult<Vec<Article>> {
-    let (_title, _display_url, articles) = get_feed_articles(client, feed_url).await?;
-    let db_entries = database::create_articles(db, feed_pk, &articles, filters).await?;
-
-    Ok(db_entries)
-}
 
 #[derive(Default)]
 pub struct FeedOptions {
@@ -186,13 +172,18 @@ pub async fn get_feed_articles(
     client: &reqwest::Client,
     feed_url: &str,
 ) -> Result<(Option<String>, String, Vec<ParsedArticle>), FeedError> {
-    let res = client.get(feed_url).send().await?.text().await?;
+    let res = crate::http::get(client, feed_url, Default::default()).await?;
     let ParsedFeedResult {
         title,
         link,
         articles,
         skipped,
-    } = parse_feed(res.as_bytes(), feed_url)?;
+    } = parse_feed(&res.body, res.url.as_str())?;
+    log_skipped(&skipped);
+    Ok((title, link, articles))
+}
+
+pub fn log_skipped(skipped: &[SkipReason]) {
     for reason in skipped {
         match reason {
             SkipReason::NoLink { entry_id } => {
@@ -203,7 +194,6 @@ pub async fn get_feed_articles(
             }
         }
     }
-    Ok((title, link, articles))
 }
 
 fn process_feed(feed: ParsedFeed) -> (Vec<ParsedArticle>, Vec<SkipReason>) {
