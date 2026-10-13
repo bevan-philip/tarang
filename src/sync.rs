@@ -92,13 +92,16 @@ async fn poll_feed(
     Ok(update.last_error)
 }
 
-/// Real-clock convenience wrapper for main.rs.
-pub async fn sync_feeds_now(db: &Db, client: &reqwest::Client) -> DbResult<SyncSummary> {
-    let now = SystemTime::now()
+pub fn unix_now() -> i64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64;
-    sync_feeds_at(db, client, now).await
+        .as_secs() as i64
+}
+
+/// Real-clock convenience wrapper for main.rs.
+pub async fn sync_feeds_now(db: &Db, client: &reqwest::Client) -> DbResult<SyncSummary> {
+    sync_feeds_at(db, client, unix_now()).await
 }
 
 #[cfg(test)]

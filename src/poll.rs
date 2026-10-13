@@ -24,7 +24,7 @@ impl Validators {
         }
     }
 
-    fn from_headers(headers: &HeaderMap) -> Self {
+    pub fn from_headers(headers: &HeaderMap) -> Self {
         let get = |name| {
             headers
                 .get(name)
@@ -127,13 +127,17 @@ fn fetch(response: &Response, now: i64) -> Fetch {
                 .get(RETRY_AFTER)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| parse_retry_after(v, now)),
-            body: String::from_utf8_lossy(&response.body)
-                .trim()
-                .chars()
-                .take(ERROR_BODY_CHARS)
-                .collect(),
+            body: error_body(&response.body),
         },
     }
+}
+
+pub fn error_body(body: &[u8]) -> String {
+    String::from_utf8_lossy(body)
+        .trim()
+        .chars()
+        .take(ERROR_BODY_CHARS)
+        .collect()
 }
 
 pub fn parse_retry_after(value: &str, now: i64) -> Option<i64> {
@@ -167,6 +171,15 @@ fn backoff(refresh_interval: i64, failure_count: i64) -> i64 {
 
 fn is_permanent(redirect: &Redirect) -> bool {
     matches!(redirect.status, 301 | 308)
+}
+
+pub fn after_add(feed: &Feed, validators: Validators, now: i64) -> PollUpdate {
+    PollUpdate {
+        last_refresh: Some(now),
+        next_poll_at: now + feed.refresh_interval,
+        validators: Some(validators),
+        ..Default::default()
+    }
 }
 
 // `moved_to_taken` is whether another feed already has the URL this feed
@@ -236,7 +249,7 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
     }
 }
 
-fn http_error_message(status: u16, body: &str) -> String {
+pub fn http_error_message(status: u16, body: &str) -> String {
     if body.is_empty() {
         format!("HTTP {status}")
     } else {

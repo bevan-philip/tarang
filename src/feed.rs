@@ -5,6 +5,8 @@ use crate::database::Db;
 use crate::database::DbError;
 use crate::database::ParsedArticle;
 use crate::filter;
+use crate::http;
+use crate::poll::{self, Validators};
 
 use feed_rs::{model::Entry, model::Feed as ParsedFeed, parser};
 
@@ -16,11 +18,45 @@ pub enum FeedError {
     Parse(#[from] feed_rs::parser::ParseFeedError),
     #[error("feed has no link to its website")]
     MissingLink,
+    #[error("invalid feed URL {url:?}: {reason}")]
+    InvalidUrl { url: String, reason: &'static str },
+    #[error("feed request failed: {}", poll::http_error_message(*status, body))]
+    Http { status: u16, body: String },
     #[error(transparent)]
     Db(#[from] DbError),
 }
 
+impl FeedError {
+    // Every error but a database one comes from the URL or what it served.
+    pub fn is_client_error(&self) -> bool {
+        !matches!(self, FeedError::Db(_))
+    }
+}
+
 pub type FeedResult<T> = Result<T, FeedError>;
+
+pub fn check_url(url: &str) -> FeedResult<()> {
+    let invalid = |reason| {
+        Err(FeedError::InvalidUrl {
+            url: url.to_string(),
+            reason,
+        })
+    };
+    // The url crate always escapes these, so they only appear in pasted text.
+    if url
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || "\"<>".contains(c))
+    {
+        return invalid("it contains a space, quote or other character not expected in a URL");
+    }
+    match reqwest::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") && parsed.host().is_some() => {
+            Ok(())
+        }
+        Ok(_) => invalid("only http and https URLs with a host are supported"),
+        Err(_) => invalid("it is not a valid URL"),
+    }
+}
 
 #[derive(Default)]
 pub struct FeedOptions {
@@ -29,25 +65,28 @@ pub struct FeedOptions {
     pub metadata: Option<String>,
     pub refresh_interval: Option<i64>,
     pub greader_hidden: bool,
+    /// A response for `url` that was already fetched (e.g. by discovery).
+    pub response: Option<http::Response>,
 }
 
 pub async fn create_feed_with_articles(
     db: &Db,
-    http: &reqwest::Client,
+    client: &reqwest::Client,
     url: &str,
     options: FeedOptions,
 ) -> FeedResult<database::Feed> {
-    let (parsed_title, display_url, articles) = get_feed_articles(http, url).await?;
+    check_url(url)?;
+    let fetched = fetch_feed(client, url, options.response).await?;
     let name = options
         .name
-        .or(parsed_title)
+        .or(fetched.title)
         .unwrap_or_else(|| url.to_string());
 
     let feed = database::create_feed(
         db,
         &name,
         url,
-        &display_url,
+        &fetched.link,
         options.category,
         options.metadata,
         options.refresh_interval,
@@ -55,20 +94,23 @@ pub async fn create_feed_with_articles(
     )
     .await?;
     let filters = filter::load_compiled_filters(db).await?;
-    database::create_articles(db, feed.pk, &articles, &filters).await?;
+    database::create_articles(db, feed.pk, &fetched.articles, &filters).await?;
+    database::record_poll(
+        db,
+        feed.pk,
+        &poll::after_add(&feed, fetched.validators, crate::sync::unix_now()),
+    )
+    .await?;
 
     Ok(feed)
 }
 
 pub async fn bulk_feeds(
-    http: &reqwest::Client,
+    client: &reqwest::Client,
     feeds: Vec<crate::opml::ImportedFeed>,
-) -> Result<
-    HashMap<crate::opml::ImportedFeed, (Option<String>, String, Vec<ParsedArticle>)>,
-    FeedError,
-> {
+) -> FeedResult<HashMap<crate::opml::ImportedFeed, FetchedFeed>> {
     let results =
-        futures::future::try_join_all(feeds.iter().map(|feed| get_feed_articles(http, &feed.url)))
+        futures::future::try_join_all(feeds.iter().map(|feed| fetch_feed(client, &feed.url, None)))
             .await?;
     Ok(feeds.into_iter().zip(results).collect())
 }
@@ -87,7 +129,7 @@ pub async fn import_opml_feeds(
             .map(|c| (c.name, c.pk))
             .collect();
 
-    for (imported, (_title, parsed_link, articles)) in bulk_fetch {
+    for (imported, fetched) in bulk_fetch {
         let category_pk = match imported.category.as_deref() {
             None => None,
             Some(name) => match category_map.get(name) {
@@ -101,7 +143,7 @@ pub async fn import_opml_feeds(
             },
         };
 
-        let display_url = imported.display_url.unwrap_or(parsed_link);
+        let display_url = imported.display_url.unwrap_or(fetched.link);
 
         let db_feed = database::create_feed(
             db,
@@ -115,7 +157,13 @@ pub async fn import_opml_feeds(
         )
         .await?;
         let filters = filter::load_compiled_filters(db).await?;
-        database::create_articles(db, db_feed.pk, &articles, &filters).await?;
+        database::create_articles(db, db_feed.pk, &fetched.articles, &filters).await?;
+        database::record_poll(
+            db,
+            db_feed.pk,
+            &poll::after_add(&db_feed, fetched.validators, crate::sync::unix_now()),
+        )
+        .await?;
     }
 
     Ok(())
@@ -168,19 +216,41 @@ pub fn parse_feed(bytes: &[u8], base_uri: &str) -> Result<ParsedFeedResult, Feed
     })
 }
 
-pub async fn get_feed_articles(
+pub struct FetchedFeed {
+    pub title: Option<String>,
+    pub link: String,
+    pub articles: Vec<ParsedArticle>,
+    pub validators: Validators,
+}
+
+pub async fn fetch_feed(
     client: &reqwest::Client,
-    feed_url: &str,
-) -> Result<(Option<String>, String, Vec<ParsedArticle>), FeedError> {
-    let res = crate::http::get(client, feed_url, Default::default()).await?;
+    url: &str,
+    response: Option<http::Response>,
+) -> FeedResult<FetchedFeed> {
+    let response = match response {
+        Some(response) => response,
+        None => http::get(client, url, Default::default()).await?,
+    };
+    if response.status != 200 {
+        return Err(FeedError::Http {
+            status: response.status,
+            body: poll::error_body(&response.body),
+        });
+    }
     let ParsedFeedResult {
         title,
         link,
         articles,
         skipped,
-    } = parse_feed(&res.body, res.url.as_str())?;
+    } = parse_feed(&response.body, response.url.as_str())?;
     log_skipped(&skipped);
-    Ok((title, link, articles))
+    Ok(FetchedFeed {
+        title,
+        link,
+        articles,
+        validators: Validators::from_headers(&response.headers),
+    })
 }
 
 pub fn log_skipped(skipped: &[SkipReason]) {
@@ -570,6 +640,93 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(db_feeds.len(), 0);
+
+        server.abort();
+    }
+
+    #[test]
+    fn check_url_accepts_plain_http_urls() {
+        assert!(check_url("https://example.org/feed?atom").is_ok());
+        assert!(check_url("http://example.org:8080/a/b.xml").is_ok());
+        assert!(check_url("https://example.org/feed?tags=a|b&q='x'^2").is_ok());
+    }
+
+    #[test]
+    fn check_url_rejects_pasted_junk() {
+        for url in [
+            " https://example.org/feed",
+            "https://example.org/feed\n",
+            "\"https://example.org/feed\"",
+            "https://example.org/my feed",
+            "<https://example.org/feed>",
+            "ftp://example.org/feed",
+            "example.org/feed",
+            "",
+        ] {
+            assert!(
+                matches!(check_url(url), Err(FeedError::InvalidUrl { .. })),
+                "{url:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn create_rejects_error_status_with_body_and_adds_nothing() {
+        use axum::{Router, http::StatusCode, routing::get};
+
+        let db = test_db().await;
+        let app = Router::new().route(
+            "/feed",
+            get(|| async { (StatusCode::FORBIDDEN, "blocked: see /policy") }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let result =
+            create_feed_with_articles(&db, &client, &format!("{base}/feed"), Default::default())
+                .await;
+        let Err(err @ FeedError::Http { status: 403, .. }) = result else {
+            panic!("expected an HTTP error");
+        };
+        assert!(err.to_string().contains("blocked: see /policy"));
+        let feeds = database::list_feeds(&db, database::FeedScope::All)
+            .await
+            .unwrap();
+        assert!(feeds.is_empty());
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn create_schedules_next_poll_and_keeps_validators() {
+        use axum::{Router, http::header, routing::get};
+
+        let db = test_db().await;
+        let app = Router::new().route(
+            "/feed",
+            get(|| async {
+                (
+                    [(header::ETAG, "\"v1\"")],
+                    rss_with_link("https://example.com/a"),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let before = crate::sync::unix_now();
+        let feed =
+            create_feed_with_articles(&db, &client, &format!("{base}/feed"), Default::default())
+                .await
+                .unwrap();
+        let stored = database::list_feed(&db, feed.pk).await.unwrap().unwrap();
+        assert_eq!(stored.etag.as_deref(), Some("\"v1\""));
+        assert!(stored.next_poll_at.unwrap() >= before + stored.refresh_interval);
+        assert!(stored.last_refresh.is_some());
 
         server.abort();
     }
