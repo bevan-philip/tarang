@@ -13,6 +13,7 @@ pub fn client_builder() -> reqwest::ClientBuilder {
         ))
         .redirect(reqwest::redirect::Policy::none())
         .referer(false)
+        .tls_backend_preconfigured(crate::tls::client_config())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

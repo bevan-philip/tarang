@@ -29,6 +29,7 @@ pub mod http;
 pub mod opml;
 pub mod poll;
 pub mod sync;
+pub mod tls;
 
 #[derive(Clone)]
 pub struct AppState {
