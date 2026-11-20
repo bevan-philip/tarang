@@ -340,8 +340,15 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
         }
     };
 
+    // Errors and 429s are counted in separate runs. A 429 shows that the
+    // server is up, so only errors count towards disabling the feed.
     let failure = |message: String, retry_after: Option<i64>, status: FeedStatus| {
-        let failure_count = feed.failure_count + 1;
+        let previous = if feed.status == status {
+            feed.failure_count
+        } else {
+            0
+        };
+        let failure_count = previous + 1;
         let retry_after = retry_after.unwrap_or(0).min(MAX_BACKOFF_SECS);
         let delay = backoff(interval, failure_count).max(retry_after);
         let status = if status == FeedStatus::BackingOff && failure_count >= MAX_FAILURES {
@@ -374,7 +381,10 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
         ),
         Fetch::HttpError {
             status: 410, body, ..
-        } => failure(http_error_message(410, body), None, FeedStatus::Gone),
+        } => PollState {
+            status: FeedStatus::Gone,
+            ..failure(http_error_message(410, body), None, FeedStatus::BackingOff)
+        },
         Fetch::HttpError {
             status: 429,
             retry_after,
@@ -441,9 +451,13 @@ mod tests {
             greader_hidden: false,
             etag: Some("\"stored\"".to_string()),
             last_modified: None,
-            status: FeedStatus::Active,
+            status: if failure_count > 0 {
+                FeedStatus::BackingOff
+            } else {
+                FeedStatus::Active
+            },
             failure_count,
-            last_error: None,
+            last_error: (failure_count > 0).then(|| "HTTP 500".to_string()),
             moved_from: None,
             redirected_to: None,
             ttl_secs: None,
@@ -684,6 +698,23 @@ mod tests {
             next_state(&feed(50), &http_error(429, None), false, NOW).status,
             FeedStatus::RateLimited
         );
+    }
+
+    #[test]
+    fn rate_limits_and_errors_are_counted_apart() {
+        let limited = next_state(&feed(MAX_FAILURES - 1), &http_error(429, None), false, NOW);
+        assert_eq!(limited.status, FeedStatus::RateLimited);
+        assert_eq!(limited.failure_count, 1);
+
+        let mut rate_limited = feed(MAX_FAILURES + 5);
+        rate_limited.status = FeedStatus::RateLimited;
+        let again = next_state(&rate_limited, &http_error(429, None), false, NOW);
+        assert_eq!(again.failure_count, MAX_FAILURES + 6);
+
+        let error = next_state(&rate_limited, &http_error(500, None), false, NOW);
+        assert_eq!(error.status, FeedStatus::BackingOff);
+        assert_eq!(error.failure_count, 1);
+        assert_eq!(error.next_poll_at, Some(NOW + 7200 + jitter(1, 7200)));
     }
 
     #[test]
