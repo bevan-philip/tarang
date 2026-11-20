@@ -947,4 +947,196 @@ mod tests {
             Some("moved permanently to https://a.example/feed, which another feed already uses")
         );
     }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        // A server's answer, kept simple enough to generate and print.
+        #[derive(Debug, Clone)]
+        enum Answer {
+            Feed {
+                max_age: Option<i64>,
+            },
+            NotModified {
+                max_age: Option<i64>,
+            },
+            NotAFeed,
+            Status {
+                status: u16,
+                retry_after: Option<i64>,
+            },
+            RequestError,
+        }
+
+        impl Answer {
+            fn served_the_feed(&self) -> bool {
+                matches!(self, Answer::Feed { .. } | Answer::NotModified { .. })
+            }
+
+            fn outcome(&self, moved_to: Option<String>) -> Outcome {
+                let fetch = match self.clone() {
+                    Answer::Feed { max_age } => Fetch::Updated {
+                        validators: Validators::default(),
+                        max_age,
+                        feed: parse_feed(RSS.as_bytes(), "https://example.com/feed").unwrap(),
+                    },
+                    Answer::NotModified { max_age } => Fetch::NotModified { max_age },
+                    Answer::NotAFeed => Fetch::NotAFeed("bad xml".to_string()),
+                    Answer::Status {
+                        status,
+                        retry_after,
+                    } => Fetch::HttpError {
+                        status,
+                        retry_after,
+                        body: String::new(),
+                    },
+                    Answer::RequestError => Fetch::RequestError("refused".to_string()),
+                };
+                Outcome {
+                    fetch,
+                    moved_to,
+                    redirected_to: None,
+                }
+            }
+        }
+
+        fn answer() -> impl Strategy<Value = Answer> {
+            let max_age = proptest::option::of(any::<i64>());
+            let status = prop_oneof![Just(410u16), Just(429), 300u16..600];
+            let retry_after = proptest::option::of(0i64..=i64::MAX);
+            prop_oneof![
+                max_age.clone().prop_map(|max_age| Answer::Feed { max_age }),
+                max_age.prop_map(|max_age| Answer::NotModified { max_age }),
+                Just(Answer::NotAFeed),
+                (status, retry_after).prop_map(|(status, retry_after)| Answer::Status {
+                    status,
+                    retry_after
+                }),
+                Just(Answer::RequestError),
+            ]
+        }
+
+        // Any feed the scheduler would poll, in a state the schema allows.
+        fn polled_feed() -> impl Strategy<Value = Feed> {
+            let status = prop_oneof![
+                Just(FeedStatus::Active),
+                Just(FeedStatus::BackingOff),
+                Just(FeedStatus::RateLimited),
+            ];
+            let skip_days = proptest::sample::subsequence(
+                vec!["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                0..=7,
+            );
+            (
+                0i64..10_000,
+                60i64..=7 * DAY_SECS,
+                status,
+                1i64..=MAX_FAILURES + 5,
+                proptest::option::of(0i64..=2 * DAY_SECS),
+                proptest::collection::btree_set(0u32..24, 0..=24),
+                skip_days,
+            )
+                .prop_map(
+                    |(pk, refresh_interval, status, failures, ttl_secs, hours, days)| {
+                        let failing = status != FeedStatus::Active;
+                        let hours: Vec<String> = hours.iter().map(u32::to_string).collect();
+                        Feed {
+                            pk,
+                            refresh_interval,
+                            status,
+                            failure_count: if failing { failures } else { 0 },
+                            last_error: failing.then(|| "HTTP 500".to_string()),
+                            ttl_secs,
+                            skip_hours: hours.join(","),
+                            skip_days: days.join(","),
+                            ..feed(0)
+                        }
+                    },
+                )
+        }
+
+        fn moved_to() -> impl Strategy<Value = Option<String>> {
+            proptest::option::of(prop_oneof![
+                Just("https://example.com/feed".to_string()),
+                Just("https://a.example/feed".to_string()),
+            ])
+        }
+
+        // The same rules as the CHECK constraints on the feed table.
+        fn fits_the_schema(state: &PollState) -> bool {
+            match state.status {
+                FeedStatus::Active => state.failure_count == 0 && state.last_error.is_none(),
+                FeedStatus::BackingOff | FeedStatus::RateLimited => {
+                    state.failure_count > 0 && state.last_error.is_some()
+                }
+                FeedStatus::TooManyErrors | FeedStatus::Gone | FeedStatus::Duplicate => {
+                    state.last_error.is_some()
+                }
+                FeedStatus::Paused => true,
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn every_poll_fits_the_schema_and_schedules_a_later_poll(
+                feed in polled_feed(),
+                answer in answer(),
+                moved_to in moved_to(),
+                moved_to_taken: bool,
+                now in 0i64..4_000_000_000,
+            ) {
+                let state = next_state(&feed, &answer.outcome(moved_to), moved_to_taken, now);
+                prop_assert!(fits_the_schema(&state), "{state:?}");
+                prop_assert!(state.next_poll_at.is_some_and(|at| at > now), "{state:?}");
+            }
+
+            #[test]
+            fn a_429_never_disables_a_feed(
+                feed in polled_feed(),
+                retry_after in proptest::option::of(0i64..=i64::MAX),
+                now in 0i64..4_000_000_000,
+            ) {
+                let answer = Answer::Status { status: 429, retry_after };
+                let state = next_state(&feed, &answer.outcome(None), false, now);
+                prop_assert_eq!(state.status, FeedStatus::RateLimited);
+            }
+
+            #[test]
+            fn only_a_run_of_errors_disables_a_feed(
+                feed in polled_feed(),
+                answer in answer(),
+                now in 0i64..4_000_000_000,
+            ) {
+                let state = next_state(&feed, &answer.outcome(None), false, now);
+                if state.status == FeedStatus::TooManyErrors {
+                    prop_assert_eq!(feed.status, FeedStatus::BackingOff);
+                    prop_assert!(feed.failure_count + 1 >= MAX_FAILURES);
+                }
+            }
+
+            #[test]
+            fn a_feed_that_answers_is_active_unless_it_moved_onto_another(
+                feed in polled_feed(),
+                answer in answer(),
+                moved_to in moved_to(),
+                moved_to_taken: bool,
+                now in 0i64..4_000_000_000,
+            ) {
+                prop_assume!(answer.served_the_feed());
+                let moved = moved_to.as_ref().filter(|url| **url != feed.url).cloned();
+                let state = next_state(&feed, &answer.outcome(moved_to), moved_to_taken, now);
+                match moved {
+                    Some(_) if moved_to_taken => {
+                        prop_assert_eq!(state.status, FeedStatus::Duplicate);
+                        prop_assert_eq!(state.url, feed.url);
+                    }
+                    moved => {
+                        prop_assert_eq!(state.status, FeedStatus::Active);
+                        prop_assert_eq!(state.url, moved.unwrap_or(feed.url));
+                    }
+                }
+            }
+        }
+    }
 }
