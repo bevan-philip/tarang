@@ -114,7 +114,8 @@ pub struct PatchFeedReq {
     metadata: Option<String>,
     refresh_interval: Option<i64>,
     greader_hidden: Option<bool>,
-    /// Set to false to resume polls of a feed that Tarang disabled after errors.
+    /// Set to true to pause polls, or false to resume a feed that is paused
+    /// or that Tarang disabled.
     disabled: Option<bool>,
     #[serde(default, with = "::serde_with::rust::double_option")]
     #[schemars(with = "Option<i64>")]

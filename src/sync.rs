@@ -78,7 +78,7 @@ async fn poll_feed(
     let update = poll::next_state(feed, &outcome, moved_to_taken, now);
 
     if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch
-        && !update.disabled
+        && !update.status.is_disabled()
     {
         log_skipped(&parsed.skipped);
         database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
@@ -114,6 +114,7 @@ pub async fn sync_feeds_now(db: &Db, client: &reqwest::Client) -> DbResult<SyncS
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::FeedStatus;
     use crate::database::{create_feed, list_feed};
     use axum::{
         Router,
@@ -395,7 +396,7 @@ mod tests {
 
         sync_feeds_at(&db, &client(), 1000).await.unwrap();
         let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
-        assert!(stored.disabled);
+        assert_eq!(stored.status, FeedStatus::Gone);
 
         let later = sync_feeds_at(&db, &client(), i64::MAX / 2).await.unwrap();
         assert_eq!(later.succeeded + later.failed, 0);
@@ -404,7 +405,7 @@ mod tests {
             .await
             .unwrap();
         let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
-        assert!(!stored.disabled);
+        assert_eq!(stored.status, FeedStatus::Active);
         assert_eq!(stored.failure_count, 0);
         assert_eq!(stored.next_poll_at, None);
 
@@ -462,7 +463,7 @@ mod tests {
         sync_feeds_at(&db, &client(), 1000).await.unwrap();
 
         let old = list_feed(&db, old.pk).await.unwrap().unwrap();
-        assert!(old.disabled);
+        assert_eq!(old.status, FeedStatus::Duplicate);
         assert_eq!(old.url, format!("{base}/old"));
         assert!(old.last_error.unwrap().contains("another feed"));
 

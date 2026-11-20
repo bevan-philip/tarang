@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               display_url = COALESCE(?, display_url),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval),\n               category = CASE WHEN ? THEN ? ELSE category END,\n               greader_hidden = COALESCE(?, greader_hidden)\n           WHERE pk = ?\n           RETURNING pk, name, url, display_url, category as \"category: Option<i64>\", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days",
+  "query": "UPDATE feed\n           SET name = COALESCE(?, name),\n               display_url = COALESCE(?, display_url),\n               metadata = COALESCE(?, metadata),\n               refresh_interval = COALESCE(?, refresh_interval),\n               category = CASE WHEN ? THEN ? ELSE category END,\n               greader_hidden = COALESCE(?, greader_hidden)\n           WHERE pk = ?\n           RETURNING pk, name, url, display_url, category as \"category: Option<i64>\", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, status as \"status: FeedStatus\", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days",
   "describe": {
     "columns": [
       {
@@ -136,24 +136,24 @@
         }
       },
       {
-        "name": "failure_count",
+        "name": "status: FeedStatus",
         "ordinal": 12,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "failure_count"
+            "name": "status"
           }
         }
       },
       {
-        "name": "disabled: bool",
+        "name": "failure_count",
         "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "disabled"
+            "name": "failure_count"
           }
         }
       },
@@ -250,5 +250,5 @@
       false
     ]
   },
-  "hash": "259bd63da97300d6e7eba425af065edcf6edb91df04250a6af753feb1ed1bada"
+  "hash": "d74ef4fd20eae272713331d02f9da50c4729873b4d8e35a88a833174f5175357"
 }

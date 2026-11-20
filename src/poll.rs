@@ -4,7 +4,7 @@ use reqwest::header::{
     RETRY_AFTER,
 };
 
-use crate::database::Feed;
+use crate::database::{Feed, FeedStatus};
 use crate::feed::{ParsedFeedResult, parse_feed};
 use crate::http::{Redirect, Response};
 
@@ -214,8 +214,8 @@ pub fn parse_retry_after(value: &str, now: i64) -> Option<i64> {
 pub struct PollUpdate {
     pub last_refresh: Option<i64>,
     pub next_poll_at: i64,
+    pub status: FeedStatus,
     pub failure_count: i64,
-    pub disabled: bool,
     pub last_error: Option<String>,
     pub validators: Option<Validators>,
     pub moved_to: Option<String>,
@@ -300,7 +300,7 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
         };
         match moved_to.clone() {
             Some(moved_to) if moved_to_taken => PollUpdate {
-                disabled: true,
+                status: FeedStatus::Duplicate,
                 last_error: Some(format!(
                     "moved permanently to {moved_to}, which another feed already uses"
                 )),
@@ -310,14 +310,19 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
         }
     };
 
-    let failure = |message: String, retry_after: Option<i64>, may_disable: bool| {
+    let failure = |message: String, retry_after: Option<i64>, status: FeedStatus| {
         let failure_count = feed.failure_count + 1;
         let retry_after = retry_after.unwrap_or(0).min(MAX_BACKOFF_SECS);
         let delay = backoff(interval, failure_count).max(retry_after);
+        let status = if status == FeedStatus::BackingOff && failure_count >= MAX_FAILURES {
+            FeedStatus::TooManyErrors
+        } else {
+            status
+        };
         PollUpdate {
             next_poll_at: schedule(feed, &FeedHints::of(feed), delay, now),
+            status,
             failure_count,
-            disabled: may_disable && failure_count >= MAX_FAILURES,
             last_error: Some(message),
             ..base.clone()
         }
@@ -334,24 +339,33 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
             *max_age,
         ),
         Fetch::NotModified { max_age } => success(None, None, *max_age),
-        Fetch::NotAFeed(message) => failure(format!("not a feed: {message}"), None, true),
+        Fetch::NotAFeed(message) => failure(
+            format!("not a feed: {message}"),
+            None,
+            FeedStatus::BackingOff,
+        ),
         Fetch::HttpError {
             status: 410, body, ..
-        } => PollUpdate {
-            disabled: true,
-            ..failure(http_error_message(410, body), None, true)
-        },
+        } => failure(http_error_message(410, body), None, FeedStatus::Gone),
         Fetch::HttpError {
             status: 429,
             retry_after,
             body,
-        } => failure(http_error_message(429, body), *retry_after, false),
+        } => failure(
+            http_error_message(429, body),
+            *retry_after,
+            FeedStatus::RateLimited,
+        ),
         Fetch::HttpError {
             status,
             retry_after,
             body,
-        } => failure(http_error_message(*status, body), *retry_after, true),
-        Fetch::RequestError(message) => failure(message.clone(), None, true),
+        } => failure(
+            http_error_message(*status, body),
+            *retry_after,
+            FeedStatus::BackingOff,
+        ),
+        Fetch::RequestError(message) => failure(message.clone(), None, FeedStatus::BackingOff),
     }
 }
 
@@ -399,8 +413,8 @@ mod tests {
             greader_hidden: false,
             etag: None,
             last_modified: None,
+            status: FeedStatus::Active,
             failure_count,
-            disabled: false,
             last_error: None,
             moved_from: None,
             redirected_to: None,
@@ -599,17 +613,26 @@ mod tests {
     #[test]
     fn repeated_failures_disable_the_feed() {
         let error = http_error(404, None);
-        assert!(!next_state(&feed(MAX_FAILURES - 2), &error, false, NOW).disabled);
-        assert!(next_state(&feed(MAX_FAILURES - 1), &error, false, NOW).disabled);
+        assert_eq!(
+            next_state(&feed(MAX_FAILURES - 2), &error, false, NOW).status,
+            FeedStatus::BackingOff
+        );
+        assert_eq!(
+            next_state(&feed(MAX_FAILURES - 1), &error, false, NOW).status,
+            FeedStatus::TooManyErrors
+        );
 
         let not_a_feed = Fetch::NotAFeed("bad xml".to_string()).into();
-        assert!(next_state(&feed(MAX_FAILURES - 1), &not_a_feed, false, NOW).disabled);
+        assert_eq!(
+            next_state(&feed(MAX_FAILURES - 1), &not_a_feed, false, NOW).status,
+            FeedStatus::TooManyErrors
+        );
     }
 
     #[test]
     fn gone_disables_immediately() {
         let update = next_state(&feed(0), &http_error(410, None), false, NOW);
-        assert!(update.disabled);
+        assert_eq!(update.status, FeedStatus::Gone);
         assert_eq!(update.last_error.as_deref(), Some("HTTP 410"));
     }
 
@@ -622,7 +645,10 @@ mod tests {
         let no_hint = next_state(&feed(0), &http_error(429, None), false, NOW);
         assert_eq!(no_hint.next_poll_at, NOW + 7200 + jitter(1, 7200));
 
-        assert!(!next_state(&feed(50), &http_error(429, None), false, NOW).disabled);
+        assert_eq!(
+            next_state(&feed(50), &http_error(429, None), false, NOW).status,
+            FeedStatus::RateLimited
+        );
     }
 
     #[test]
@@ -641,7 +667,7 @@ mod tests {
             let update = next_state(&feed(0), &outcome, false, NOW);
             assert_eq!(update.moved_to.as_deref(), Some("https://a.example/feed"));
             assert_eq!(update.redirected_to, None);
-            assert!(!update.disabled);
+            assert_eq!(update.status, FeedStatus::Active);
         }
     }
 
@@ -815,7 +841,7 @@ mod tests {
         let outcome = redirected(&[(301, "https://example.com/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
         assert_eq!(update.moved_to, None);
-        assert!(!update.disabled);
+        assert_eq!(update.status, FeedStatus::Active);
     }
 
     #[test]
@@ -828,7 +854,7 @@ mod tests {
 
         let update = next_state(&feed(0), &failed, true, NOW);
         assert_eq!(update.moved_to, None);
-        assert!(!update.disabled);
+        assert_eq!(update.status, FeedStatus::BackingOff);
     }
 
     #[test]
@@ -844,7 +870,7 @@ mod tests {
     fn moving_onto_another_feeds_url_disables_this_feed() {
         let outcome = redirected(&[(301, "https://a.example/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
-        assert!(update.disabled);
+        assert_eq!(update.status, FeedStatus::Duplicate);
         assert_eq!(update.moved_to, None);
         assert_eq!(
             update.last_error.as_deref(),

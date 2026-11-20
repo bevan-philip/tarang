@@ -2,6 +2,29 @@ use super::{Db, DbResult, FeedScope};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, sqlx::Type, Serialize, JsonSchema)]
+#[sqlx(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum FeedStatus {
+    #[default]
+    Active,
+    BackingOff,
+    RateLimited,
+    Paused,
+    TooManyErrors,
+    Gone,
+    Duplicate,
+}
+
+impl FeedStatus {
+    pub fn is_disabled(self) -> bool {
+        matches!(
+            self,
+            Self::Paused | Self::TooManyErrors | Self::Gone | Self::Duplicate
+        )
+    }
+}
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Feed {
     pub pk: i64,
@@ -20,8 +43,8 @@ pub struct Feed {
     pub etag: Option<String>,
     #[serde(skip)]
     pub last_modified: Option<String>,
+    pub status: FeedStatus,
     pub failure_count: i64,
-    pub disabled: bool,
     pub last_error: Option<String>,
     pub moved_from: Option<String>,
     pub redirected_to: Option<String>,
@@ -64,7 +87,7 @@ pub async fn create_feed(
         Feed,
         r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
+           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
         name,
         url,
         display_url,
@@ -82,7 +105,7 @@ pub async fn create_feed(
 pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE pk = ?"#,
         pk,
     )
@@ -95,7 +118,7 @@ pub async fn list_feed(db: &Db, pk: i64) -> DbResult<Option<Feed>> {
 pub async fn get_feed_by_url(db: &Db, url: &str) -> DbResult<Option<Feed>> {
     let feed = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE url = ?"#,
         url,
     )
@@ -109,7 +132,7 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
     let visible_only = scope.visible_only();
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name"#,
         visible_only,
     )
@@ -122,9 +145,10 @@ pub async fn list_feeds(db: &Db, scope: FeedScope) -> DbResult<Vec<Feed>> {
 pub async fn list_feeds_due_for_refresh_at(db: &Db, now: i64) -> DbResult<Vec<Feed>> {
     let feeds = sqlx::query_as!(
         Feed,
-        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
+        r#"SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days
            FROM feed
-           WHERE disabled = 0 AND (next_poll_at IS NULL OR next_poll_at <= ?)"#,
+           WHERE status IN ('active', 'backing_off', 'rate_limited')
+             AND (next_poll_at IS NULL OR next_poll_at <= ?)"#,
         now,
     )
     .fetch_all(&db.read)
@@ -163,8 +187,9 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
         r#"UPDATE feed
            SET last_refresh = COALESCE(?, last_refresh),
                next_poll_at = ?,
+               status = CASE WHEN status IN ('paused', 'too_many_errors', 'gone', 'duplicate')
+                             THEN status ELSE ? END,
                failure_count = ?,
-               disabled = disabled OR ?,
                last_error = ?,
                etag = CASE WHEN ? THEN ? ELSE etag END,
                last_modified = CASE WHEN ? THEN ? ELSE last_modified END,
@@ -177,8 +202,8 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
            WHERE pk = ?"#,
         update.last_refresh,
         update.next_poll_at,
+        update.status,
         update.failure_count,
-        update.disabled,
         update.last_error,
         validators_provided,
         validators.etag,
@@ -204,7 +229,11 @@ pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> 
 pub async fn set_feed_disabled(db: &Db, pk: i64, disabled: bool) -> DbResult<()> {
     sqlx::query!(
         r#"UPDATE feed
-           SET disabled = ?,
+           SET status = CASE
+                   WHEN NOT ? THEN 'active'
+                   WHEN status IN ('active', 'backing_off', 'rate_limited') THEN 'paused'
+                   ELSE status
+               END,
                failure_count = CASE WHEN ? THEN failure_count ELSE 0 END,
                next_poll_at = CASE WHEN ? THEN next_poll_at ELSE NULL END
            WHERE pk = ?"#,
@@ -243,7 +272,7 @@ pub async fn update_feed(
                category = CASE WHEN ? THEN ? ELSE category END,
                greader_hidden = COALESCE(?, greader_hidden)
            WHERE pk = ?
-           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, failure_count, disabled as "disabled: bool", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
+           RETURNING pk, name, url, display_url, category as "category: Option<i64>", metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
         name,
         display_url,
         metadata,
@@ -298,8 +327,8 @@ mod tests {
             greader_hidden: false,
             etag: None,
             last_modified: None,
+            status: FeedStatus::Active,
             failure_count: 0,
-            disabled: false,
             last_error: None,
             moved_from: None,
             redirected_to: None,

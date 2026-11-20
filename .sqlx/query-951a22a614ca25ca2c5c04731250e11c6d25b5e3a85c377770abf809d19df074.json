@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed WHERE pk = ?",
+  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, status as \"status: FeedStatus\", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed WHERE pk = ?",
   "describe": {
     "columns": [
       {
@@ -136,24 +136,24 @@
         }
       },
       {
-        "name": "failure_count",
+        "name": "status: FeedStatus",
         "ordinal": 12,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "failure_count"
+            "name": "status"
           }
         }
       },
       {
-        "name": "disabled: bool",
+        "name": "failure_count",
         "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "disabled"
+            "name": "failure_count"
           }
         }
       },
@@ -250,5 +250,5 @@
       false
     ]
   },
-  "hash": "1ea1d502af73c9629fcb8ccbd58bd9cf7399dea3f71d1cebcc498363c6d4d625"
+  "hash": "951a22a614ca25ca2c5c04731250e11c6d25b5e3a85c377770abf809d19df074"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, failure_count, disabled as \"disabled: bool\", last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed WHERE NOT ? OR greader_hidden = 0 ORDER BY name",
+  "query": "SELECT pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, status as \"status: FeedStatus\", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days\n           FROM feed\n           WHERE status IN ('active', 'backing_off', 'rate_limited')\n             AND (next_poll_at IS NULL OR next_poll_at <= ?)",
   "describe": {
     "columns": [
       {
@@ -136,24 +136,24 @@
         }
       },
       {
-        "name": "failure_count",
+        "name": "status: FeedStatus",
         "ordinal": 12,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "failure_count"
+            "name": "status"
           }
         }
       },
       {
-        "name": "disabled: bool",
+        "name": "failure_count",
         "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "feed",
-            "name": "disabled"
+            "name": "failure_count"
           }
         }
       },
@@ -250,5 +250,5 @@
       false
     ]
   },
-  "hash": "a10db0cba942176bddaddbfe55f932bd85b2177fe6255b579992d081c4448247"
+  "hash": "c4469be7707ef5cffc3fb71ed8b62b82fdd95843fe9b9de06ab01ddf1c7c218a"
 }
