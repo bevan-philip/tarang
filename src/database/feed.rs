@@ -306,8 +306,10 @@ pub async fn set_feed_disabled(db: &Db, pk: i64, disabled: bool) -> DbResult<()>
                    ELSE status
                END,
                failure_count = CASE WHEN ? THEN failure_count ELSE 0 END,
+               last_error = CASE WHEN ? THEN last_error ELSE NULL END,
                next_poll_at = CASE WHEN ? THEN next_poll_at ELSE NULL END
            WHERE pk = ?"#,
+        disabled,
         disabled,
         disabled,
         disabled,

@@ -408,6 +408,7 @@ mod tests {
         let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
         assert_eq!(stored.status, FeedStatus::Active);
         assert_eq!(stored.failure_count, 0);
+        assert_eq!(stored.last_error, None);
         assert_eq!(stored.next_poll_at, None);
 
         server.abort();

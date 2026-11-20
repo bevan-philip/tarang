@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET status = CASE\n                   WHEN NOT ? THEN 'active'\n                   WHEN status IN ('active', 'backing_off', 'rate_limited') THEN 'paused'\n                   ELSE status\n               END,\n               failure_count = CASE WHEN ? THEN failure_count ELSE 0 END,\n               last_error = CASE WHEN ? THEN last_error ELSE NULL END,\n               next_poll_at = CASE WHEN ? THEN next_poll_at ELSE NULL END\n           WHERE pk = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "5674f341f47df585ac00629e6555a1b4970bb3a8e718ba0f2a8da9c2927df50b"
+}
