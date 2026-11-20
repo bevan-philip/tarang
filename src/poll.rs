@@ -211,16 +211,34 @@ pub fn parse_retry_after(value: &str, now: i64) -> Option<i64> {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PollUpdate {
-    pub last_refresh: Option<i64>,
-    pub next_poll_at: i64,
+pub struct PollState {
+    pub url: String,
     pub status: FeedStatus,
     pub failure_count: i64,
     pub last_error: Option<String>,
-    pub validators: Option<Validators>,
-    pub moved_to: Option<String>,
+    pub last_refresh: Option<i64>,
+    pub next_poll_at: Option<i64>,
+    pub validators: Validators,
+    pub hints: FeedHints,
+    pub moved_from: Option<String>,
     pub redirected_to: Option<String>,
-    pub hints: Option<FeedHints>,
+}
+
+impl PollState {
+    pub fn of(feed: &Feed) -> Self {
+        PollState {
+            url: feed.url.clone(),
+            status: feed.status,
+            failure_count: feed.failure_count,
+            last_error: feed.last_error.clone(),
+            last_refresh: feed.last_refresh,
+            next_poll_at: feed.next_poll_at,
+            validators: Validators::of(feed),
+            hints: FeedHints::of(feed),
+            moved_from: feed.moved_from.clone(),
+            redirected_to: feed.redirected_to.clone(),
+        }
+    }
 }
 
 fn backoff(refresh_interval: i64, failure_count: i64) -> i64 {
@@ -235,13 +253,18 @@ fn is_permanent(redirect: &Redirect) -> bool {
     matches!(redirect.status, 301 | 308)
 }
 
-pub fn after_add(feed: &Feed, validators: Validators, hints: FeedHints, now: i64) -> PollUpdate {
-    PollUpdate {
+pub fn after_add(feed: &Feed, validators: Validators, hints: FeedHints, now: i64) -> PollState {
+    PollState {
         last_refresh: Some(now),
-        next_poll_at: schedule(feed, &hints, success_interval(feed, &hints, None), now),
-        validators: Some(validators),
-        hints: Some(hints),
-        ..Default::default()
+        next_poll_at: Some(schedule(
+            feed,
+            &hints,
+            success_interval(feed, &hints, None),
+            now,
+        )),
+        validators,
+        hints,
+        ..PollState::of(feed)
     }
 }
 
@@ -280,33 +303,40 @@ fn schedule(feed: &Feed, hints: &FeedHints, delay: i64, now: i64) -> i64 {
 // `moved_to_taken` is whether another feed already has the URL this feed
 // moved to; the feed is then disabled rather than duplicated. A move is only
 // followed once the new URL has served the feed.
-pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64) -> PollUpdate {
+pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64) -> PollState {
     let interval = feed.refresh_interval;
     let moved_to = outcome.moved_to.clone().filter(|url| *url != feed.url);
-    let base = PollUpdate {
+    let current = PollState {
         redirected_to: outcome.redirected_to.clone(),
-        ..Default::default()
+        ..PollState::of(feed)
     };
 
-    let success = |validators: Option<Validators>, hints: Option<FeedHints>, max_age| {
-        let known_hints = hints.clone().unwrap_or_else(|| FeedHints::of(feed));
-        let delay = success_interval(feed, &known_hints, max_age);
-        let update = PollUpdate {
+    let success = |validators: Validators, hints: FeedHints, max_age| {
+        let delay = success_interval(feed, &hints, max_age);
+        let state = PollState {
+            status: FeedStatus::Active,
+            failure_count: 0,
+            last_error: None,
             last_refresh: Some(now),
-            next_poll_at: schedule(feed, &known_hints, delay, now),
+            next_poll_at: Some(schedule(feed, &hints, delay, now)),
             validators,
             hints,
-            ..base.clone()
+            ..current.clone()
         };
         match moved_to.clone() {
-            Some(moved_to) if moved_to_taken => PollUpdate {
+            Some(moved_to) if moved_to_taken => PollState {
                 status: FeedStatus::Duplicate,
                 last_error: Some(format!(
                     "moved permanently to {moved_to}, which another feed already uses"
                 )),
-                ..update
+                ..state
             },
-            moved_to => PollUpdate { moved_to, ..update },
+            Some(moved_to) => PollState {
+                url: moved_to,
+                moved_from: Some(feed.url.clone()),
+                ..state
+            },
+            None => state,
         }
     };
 
@@ -319,12 +349,12 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
         } else {
             status
         };
-        PollUpdate {
-            next_poll_at: schedule(feed, &FeedHints::of(feed), delay, now),
+        PollState {
             status,
             failure_count,
             last_error: Some(message),
-            ..base.clone()
+            next_poll_at: Some(schedule(feed, &current.hints, delay, now)),
+            ..current.clone()
         }
     };
 
@@ -333,12 +363,10 @@ pub fn next_state(feed: &Feed, outcome: &Outcome, moved_to_taken: bool, now: i64
             validators,
             max_age,
             feed: parsed,
-        } => success(
-            Some(validators.clone()),
-            Some(parsed.hints.clone()),
-            *max_age,
-        ),
-        Fetch::NotModified { max_age } => success(None, None, *max_age),
+        } => success(validators.clone(), parsed.hints.clone(), *max_age),
+        Fetch::NotModified { max_age } => {
+            success(current.validators.clone(), current.hints.clone(), *max_age)
+        }
         Fetch::NotAFeed(message) => failure(
             format!("not a feed: {message}"),
             None,
@@ -411,7 +439,7 @@ mod tests {
             last_refresh: None,
             next_poll_at: None,
             greader_hidden: false,
-            etag: None,
+            etag: Some("\"stored\"".to_string()),
             last_modified: None,
             status: FeedStatus::Active,
             failure_count,
@@ -564,14 +592,18 @@ mod tests {
             feed: parse_feed(RSS.as_bytes(), "https://example.com/feed").unwrap(),
         }
         .into();
-        let update = next_state(&feed(3), &outcome, false, NOW);
+        let mut failing = feed(3);
+        failing.status = FeedStatus::BackingOff;
+        failing.last_error = Some("HTTP 500".to_string());
+        let update = next_state(&failing, &outcome, false, NOW);
         assert_eq!(
             update,
-            PollUpdate {
+            PollState {
+                url: "https://example.com/feed".to_string(),
                 last_refresh: Some(NOW),
-                next_poll_at: NOW + 3600 + jitter(1, 3600),
-                validators: Some(validators),
-                hints: Some(FeedHints::default()),
+                next_poll_at: Some(NOW + 3600 + jitter(1, 3600)),
+                validators,
+                hints: FeedHints::default(),
                 ..Default::default()
             }
         );
@@ -585,28 +617,31 @@ mod tests {
             false,
             NOW,
         );
-        assert_eq!(update.validators, None);
+        assert_eq!(update.validators, Validators::of(&feed(0)));
         assert_eq!(update.last_refresh, Some(NOW));
-        assert_eq!(update.next_poll_at, NOW + 3600 + jitter(1, 3600));
+        assert_eq!(update.next_poll_at, Some(NOW + 3600 + jitter(1, 3600)));
     }
 
     #[test]
     fn failures_back_off_exponentially_and_never_speed_up() {
         let error = Fetch::RequestError("connection refused".to_string()).into();
         let first = next_state(&feed(0), &error, false, NOW);
-        assert_eq!(first.next_poll_at, NOW + 7200 + jitter(1, 7200));
+        assert_eq!(first.next_poll_at, Some(NOW + 7200 + jitter(1, 7200)));
         assert_eq!(first.failure_count, 1);
         assert_eq!(first.last_error.as_deref(), Some("connection refused"));
         assert_eq!(first.last_refresh, None);
-        assert_eq!(first.validators, None);
+        assert_eq!(first.validators, Validators::of(&feed(0)));
 
         let third = next_state(&feed(2), &error, false, NOW);
-        assert_eq!(third.next_poll_at, NOW + 3600 * 8 + jitter(1, 3600 * 8));
+        assert_eq!(
+            third.next_poll_at,
+            Some(NOW + 3600 * 8 + jitter(1, 3600 * 8))
+        );
 
         let capped = next_state(&feed(8), &error, false, NOW);
         assert_eq!(
             capped.next_poll_at,
-            NOW + MAX_BACKOFF_SECS + jitter(1, MAX_BACKOFF_SECS)
+            Some(NOW + MAX_BACKOFF_SECS + jitter(1, MAX_BACKOFF_SECS))
         );
     }
 
@@ -639,11 +674,11 @@ mod tests {
     #[test]
     fn too_many_requests_honours_retry_after_and_never_disables() {
         let update = next_state(&feed(0), &http_error(429, Some(86400)), false, NOW);
-        assert_eq!(update.next_poll_at, NOW + 86400 + jitter(1, 86400));
-        assert_eq!(update.validators, None);
+        assert_eq!(update.next_poll_at, Some(NOW + 86400 + jitter(1, 86400)));
+        assert_eq!(update.validators, Validators::of(&feed(0)));
 
         let no_hint = next_state(&feed(0), &http_error(429, None), false, NOW);
-        assert_eq!(no_hint.next_poll_at, NOW + 7200 + jitter(1, 7200));
+        assert_eq!(no_hint.next_poll_at, Some(NOW + 7200 + jitter(1, 7200)));
 
         assert_eq!(
             next_state(&feed(50), &http_error(429, None), false, NOW).status,
@@ -654,7 +689,7 @@ mod tests {
     #[test]
     fn short_retry_after_does_not_speed_up_polling() {
         let update = next_state(&feed(0), &http_error(503, Some(5)), false, NOW);
-        assert_eq!(update.next_poll_at, NOW + 7200 + jitter(1, 7200));
+        assert_eq!(update.next_poll_at, Some(NOW + 7200 + jitter(1, 7200)));
     }
 
     #[test]
@@ -665,7 +700,11 @@ mod tests {
             assert_eq!(outcome.redirected_to, None);
 
             let update = next_state(&feed(0), &outcome, false, NOW);
-            assert_eq!(update.moved_to.as_deref(), Some("https://a.example/feed"));
+            assert_eq!(update.url, "https://a.example/feed");
+            assert_eq!(
+                update.moved_from.as_deref(),
+                Some("https://example.com/feed")
+            );
             assert_eq!(update.redirected_to, None);
             assert_eq!(update.status, FeedStatus::Active);
         }
@@ -678,7 +717,7 @@ mod tests {
             assert_eq!(outcome.moved_to, None);
 
             let update = next_state(&feed(0), &outcome, false, NOW);
-            assert_eq!(update.moved_to, None);
+            assert_eq!(update.url, "https://example.com/feed");
             assert_eq!(
                 update.redirected_to.as_deref(),
                 Some("https://a.example/feed")
@@ -721,7 +760,7 @@ mod tests {
             false,
             NOW,
         );
-        assert_eq!(update.moved_to, None);
+        assert_eq!(update.url, "https://example.com/feed");
         assert_eq!(update.redirected_to, None);
     }
 
@@ -840,7 +879,7 @@ mod tests {
     fn redirect_to_its_own_url_is_not_a_move() {
         let outcome = redirected(&[(301, "https://example.com/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
-        assert_eq!(update.moved_to, None);
+        assert_eq!(update.url, "https://example.com/feed");
         assert_eq!(update.status, FeedStatus::Active);
     }
 
@@ -849,11 +888,11 @@ mod tests {
         let mut failed = http_error(404, None);
         failed.moved_to = Some("https://a.example/feed".to_string());
         let update = next_state(&feed(0), &failed, false, NOW);
-        assert_eq!(update.moved_to, None);
+        assert_eq!(update.url, "https://example.com/feed");
         assert_eq!(update.last_error.as_deref(), Some("HTTP 404"));
 
         let update = next_state(&feed(0), &failed, true, NOW);
-        assert_eq!(update.moved_to, None);
+        assert_eq!(update.url, "https://example.com/feed");
         assert_eq!(update.status, FeedStatus::BackingOff);
     }
 
@@ -862,7 +901,7 @@ mod tests {
         let update = next_state(&feed(0), &http_error(429, Some(i64::MAX)), false, NOW);
         assert_eq!(
             update.next_poll_at,
-            NOW + MAX_BACKOFF_SECS + jitter(1, MAX_BACKOFF_SECS)
+            Some(NOW + MAX_BACKOFF_SECS + jitter(1, MAX_BACKOFF_SECS))
         );
     }
 
@@ -871,7 +910,7 @@ mod tests {
         let outcome = redirected(&[(301, "https://a.example/feed")]);
         let update = next_state(&feed(0), &outcome, true, NOW);
         assert_eq!(update.status, FeedStatus::Duplicate);
-        assert_eq!(update.moved_to, None);
+        assert_eq!(update.url, "https://example.com/feed");
         assert_eq!(
             update.last_error.as_deref(),
             Some("moved permanently to https://a.example/feed, which another feed already uses")

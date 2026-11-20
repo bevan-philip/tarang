@@ -176,48 +176,39 @@ pub async fn update_feed_last_refresh(
     Ok(())
 }
 
-pub async fn record_poll(db: &Db, pk: i64, update: &crate::poll::PollUpdate) -> DbResult<()> {
-    let validators_provided = update.validators.is_some();
-    let validators = update.validators.clone().unwrap_or_default();
-    let hints_provided = update.hints.is_some();
-    let hints = update.hints.clone().unwrap_or_default();
-    let skip_hours = hints.skip_hours_text();
-    let skip_days = hints.skip_days_text();
+pub async fn record_poll(db: &Db, pk: i64, state: &crate::poll::PollState) -> DbResult<()> {
+    let skip_hours = state.hints.skip_hours_text();
+    let skip_days = state.hints.skip_days_text();
     sqlx::query!(
         r#"UPDATE feed
-           SET last_refresh = COALESCE(?, last_refresh),
-               next_poll_at = ?,
+           SET url = ?,
                status = CASE WHEN status IN ('paused', 'too_many_errors', 'gone', 'duplicate')
                              THEN status ELSE ? END,
                failure_count = ?,
                last_error = ?,
-               etag = CASE WHEN ? THEN ? ELSE etag END,
-               last_modified = CASE WHEN ? THEN ? ELSE last_modified END,
-               moved_from = CASE WHEN ? IS NOT NULL THEN url ELSE moved_from END,
-               url = COALESCE(?, url),
-               redirected_to = ?,
-               ttl_secs = CASE WHEN ? THEN ? ELSE ttl_secs END,
-               skip_hours = CASE WHEN ? THEN ? ELSE skip_hours END,
-               skip_days = CASE WHEN ? THEN ? ELSE skip_days END
+               last_refresh = ?,
+               next_poll_at = ?,
+               etag = ?,
+               last_modified = ?,
+               ttl_secs = ?,
+               skip_hours = ?,
+               skip_days = ?,
+               moved_from = ?,
+               redirected_to = ?
            WHERE pk = ?"#,
-        update.last_refresh,
-        update.next_poll_at,
-        update.status,
-        update.failure_count,
-        update.last_error,
-        validators_provided,
-        validators.etag,
-        validators_provided,
-        validators.last_modified,
-        update.moved_to,
-        update.moved_to,
-        update.redirected_to,
-        hints_provided,
-        hints.ttl_secs,
-        hints_provided,
+        state.url,
+        state.status,
+        state.failure_count,
+        state.last_error,
+        state.last_refresh,
+        state.next_poll_at,
+        state.validators.etag,
+        state.validators.last_modified,
+        state.hints.ttl_secs,
         skip_hours,
-        hints_provided,
         skip_days,
+        state.moved_from,
+        state.redirected_to,
         pk,
     )
     .execute(&db.write)

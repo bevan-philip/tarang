@@ -86,7 +86,7 @@ async fn poll_feed(
 
     // Another feed may have moved to the same URL since the check above.
     let update = match record_poll(db, feed.pk, &update).await {
-        Err(DbError::AlreadyExists(_)) if update.moved_to.is_some() => {
+        Err(DbError::AlreadyExists(_)) if update.url != feed.url => {
             let update = poll::next_state(feed, &outcome, true, now);
             record_poll(db, feed.pk, &update).await?;
             update
