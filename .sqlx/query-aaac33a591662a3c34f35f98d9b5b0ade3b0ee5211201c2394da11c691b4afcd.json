@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, status as \"status: FeedStatus\", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days",
+  "query": "INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           RETURNING pk as \"pk!\", name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as \"greader_hidden: bool\", etag, last_modified, status as \"status: FeedStatus\", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days",
   "describe": {
     "columns": [
       {
-        "name": "pk",
+        "name": "pk!",
         "ordinal": 0,
         "type_info": "Integer",
         "origin": {
@@ -228,11 +228,11 @@
       "Right": 7
     },
     "nullable": [
+      null,
       false,
       false,
       false,
-      false,
-      false,
+      true,
       false,
       false,
       true,
@@ -250,5 +250,5 @@
       false
     ]
   },
-  "hash": "3a0a8846ad431f7510a6e6f3fc2959d0232504333ddb19cf4a701085456dc0cd"
+  "hash": "aaac33a591662a3c34f35f98d9b5b0ade3b0ee5211201c2394da11c691b4afcd"
 }

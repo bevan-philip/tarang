@@ -3,7 +3,8 @@
 -- Replaces the `disabled` flag with a `status` that also says why a feed is
 -- not being polled. Existing rows are backfilled from `disabled`,
 -- `failure_count` and `last_error`; the error text is the only record of
--- why a feed was disabled.
+-- why a feed was disabled. Active feeds lose any error left over from
+-- before they were resumed.
 
 PRAGMA foreign_keys=OFF;
 
@@ -34,7 +35,11 @@ CREATE TABLE feed_new (
     redirected_to    TEXT             DEFAULT NULL,
     ttl_secs         INTEGER          DEFAULT NULL,
     skip_hours       TEXT    NOT NULL DEFAULT '',
-    skip_days        TEXT    NOT NULL DEFAULT ''
+    skip_days        TEXT    NOT NULL DEFAULT '',
+    CHECK (status <> 'active' OR (failure_count = 0 AND last_error IS NULL)),
+    CHECK (status NOT IN ('backing_off', 'rate_limited')
+           OR (failure_count > 0 AND last_error IS NOT NULL)),
+    CHECK (status NOT IN ('too_many_errors', 'gone', 'duplicate') OR last_error IS NOT NULL)
 ) STRICT;
 
 INSERT INTO feed_new (pk, name, url, display_url, category, metadata, refresh_interval,
@@ -43,18 +48,23 @@ INSERT INTO feed_new (pk, name, url, display_url, category, metadata, refresh_in
                       ttl_secs, skip_hours, skip_days)
 SELECT pk, name, url, display_url, category, metadata, refresh_interval,
        last_refresh, next_poll_at, greader_hidden, etag, last_modified,
-       CASE
-           WHEN disabled = 1 AND last_error LIKE 'HTTP 410%' THEN 'gone'
-           WHEN disabled = 1 AND last_error LIKE '%which another feed already uses' THEN 'duplicate'
-           WHEN disabled = 1 AND failure_count >= 10 THEN 'too_many_errors'
-           WHEN disabled = 1 THEN 'paused'
-           WHEN failure_count > 0 AND last_error LIKE 'HTTP 429%' THEN 'rate_limited'
-           WHEN failure_count > 0 THEN 'backing_off'
-           ELSE 'active'
-       END,
-       failure_count, last_error, moved_from, redirected_to,
-       ttl_secs, skip_hours, skip_days
-FROM feed;
+       status,
+       CASE WHEN status = 'active' THEN 0 ELSE failure_count END,
+       CASE WHEN status = 'active' THEN NULL ELSE last_error END,
+       moved_from, redirected_to, ttl_secs, skip_hours, skip_days
+FROM (
+    SELECT *,
+           CASE
+               WHEN disabled = 1 AND last_error LIKE 'HTTP 410%' THEN 'gone'
+               WHEN disabled = 1 AND last_error LIKE '%which another feed already uses' THEN 'duplicate'
+               WHEN disabled = 1 AND failure_count >= 10 AND last_error IS NOT NULL THEN 'too_many_errors'
+               WHEN disabled = 1 THEN 'paused'
+               WHEN failure_count > 0 AND last_error LIKE 'HTTP 429%' THEN 'rate_limited'
+               WHEN failure_count > 0 AND last_error IS NOT NULL THEN 'backing_off'
+               ELSE 'active'
+           END AS status
+    FROM feed
+);
 
 DROP TABLE feed;
 ALTER TABLE feed_new RENAME TO feed;

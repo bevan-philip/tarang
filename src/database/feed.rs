@@ -131,7 +131,7 @@ async fn insert_feed(conn: &mut SqliteConnection, new: &NewFeed<'_>) -> DbResult
         Feed,
         r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
+           RETURNING pk as "pk!", name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
         new.name,
         new.url,
         new.display_url,
@@ -421,6 +421,41 @@ mod tests {
     fn html_url_prefers_display_url_when_present() {
         let feed = make_feed("https://example.com/feed.xml", "https://example.com/site");
         assert_eq!(feed.html_url(), "https://example.com/site");
+    }
+
+    #[tokio::test]
+    async fn the_schema_rejects_an_error_count_that_does_not_fit_the_status() {
+        let db = test_db().await;
+        let feed = create_feed(
+            &db,
+            "Feed",
+            "https://example.com/feed",
+            "",
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let set = |status: &'static str, failure_count: i64, last_error: Option<&'static str>| {
+            sqlx::query(
+                "UPDATE feed SET status = ?, failure_count = ?, last_error = ? WHERE pk = ?",
+            )
+            .bind(status)
+            .bind(failure_count)
+            .bind(last_error)
+            .bind(feed.pk)
+            .execute(&db.write)
+        };
+
+        assert!(set("active", 0, Some("HTTP 500")).await.is_err());
+        assert!(set("active", 2, None).await.is_err());
+        assert!(set("backing_off", 0, Some("HTTP 500")).await.is_err());
+        assert!(set("rate_limited", 1, None).await.is_err());
+        assert!(set("gone", 1, None).await.is_err());
+        assert!(set("backing_off", 1, Some("HTTP 500")).await.is_ok());
+        assert!(set("paused", 0, None).await.is_ok());
     }
 
     #[tokio::test]
