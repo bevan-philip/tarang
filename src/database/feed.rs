@@ -72,6 +72,16 @@ impl Feed {
     }
 }
 
+pub struct NewFeed<'a> {
+    pub name: &'a str,
+    pub url: &'a str,
+    pub display_url: &'a str,
+    pub category: Option<i64>,
+    pub metadata: Option<String>,
+    pub refresh_interval: Option<i64>,
+    pub greader_hidden: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_feed(
     db: &Db,
@@ -83,14 +93,7 @@ pub async fn create_feed(
     refresh_interval: Option<i64>,
     greader_hidden: bool,
 ) -> DbResult<Feed> {
-    let metadata = metadata.unwrap_or_else(|| "{}".to_string());
-    let refresh_interval = refresh_interval.unwrap_or(3600);
-
-    let feed = sqlx::query_as!(
-        Feed,
-        r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
+    let new = NewFeed {
         name,
         url,
         display_url,
@@ -98,8 +101,46 @@ pub async fn create_feed(
         metadata,
         refresh_interval,
         greader_hidden,
+    };
+    insert_feed(&mut *db.write.acquire().await?, &new).await
+}
+
+// Adds a feed, the articles first fetched from it and its first poll state
+// in one transaction. `first_poll` is given the new row, since the poll
+// state depends on its `pk`.
+pub async fn create_feed_with_first_poll(
+    db: &Db,
+    new: &NewFeed<'_>,
+    articles: &[ParsedArticle],
+    filters: &[CompiledFilter],
+    first_poll: impl FnOnce(&Feed) -> PollState,
+) -> DbResult<Feed> {
+    let mut tx = db.write.begin_with("BEGIN IMMEDIATE").await?;
+    let feed = insert_feed(&mut tx, new).await?;
+    write_poll_state(&mut tx, feed.pk, FeedStatus::Active, &first_poll(&feed)).await?;
+    insert_articles(&mut tx, feed.pk, articles, filters).await?;
+    tx.commit().await?;
+    Ok(feed)
+}
+
+async fn insert_feed(conn: &mut SqliteConnection, new: &NewFeed<'_>) -> DbResult<Feed> {
+    let metadata = new.metadata.as_deref().unwrap_or("{}");
+    let refresh_interval = new.refresh_interval.unwrap_or(3600);
+
+    let feed = sqlx::query_as!(
+        Feed,
+        r#"INSERT INTO feed (name, url, display_url, category, metadata, refresh_interval, greader_hidden)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           RETURNING pk, name, url, display_url, category, metadata, refresh_interval, last_refresh, next_poll_at, greader_hidden as "greader_hidden: bool", etag, last_modified, status as "status: FeedStatus", failure_count, last_error, moved_from, redirected_to, ttl_secs, skip_hours, skip_days"#,
+        new.name,
+        new.url,
+        new.display_url,
+        new.category,
+        metadata,
+        refresh_interval,
+        new.greader_hidden,
     )
-    .fetch_one(&db.write)
+    .fetch_one(conn)
     .await?;
 
     Ok(feed)

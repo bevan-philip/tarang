@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::database;
 use crate::database::Db;
 use crate::database::DbError;
-use crate::database::FeedStatus;
+use crate::database::NewFeed;
 use crate::database::ParsedArticle;
 use crate::filter;
 use crate::http;
@@ -86,33 +86,22 @@ pub async fn create_feed_with_articles(
         .or(fetched.title)
         .unwrap_or_else(|| url.to_string());
 
-    let feed = database::create_feed(
-        db,
-        &name,
-        url,
-        &fetched.link,
-        options.category,
-        options.metadata,
-        options.refresh_interval,
-        options.greader_hidden,
-    )
-    .await?;
     let filters = filter::load_compiled_filters(db).await?;
-    let state = poll::after_add(
-        &feed,
-        fetched.validators,
-        fetched.hints,
-        crate::sync::unix_now(),
-    );
-    database::record_poll(
-        db,
-        feed.pk,
-        FeedStatus::Active,
-        &state,
-        &fetched.articles,
-        &filters,
-    )
-    .await?;
+    let new = NewFeed {
+        name: &name,
+        url,
+        display_url: &fetched.link,
+        category: options.category,
+        metadata: options.metadata,
+        refresh_interval: options.refresh_interval,
+        greader_hidden: options.greader_hidden,
+    };
+    let now = crate::sync::unix_now();
+    let feed =
+        database::create_feed_with_first_poll(db, &new, &fetched.articles, &filters, |feed| {
+            poll::after_add(feed, fetched.validators, fetched.hints, now)
+        })
+        .await?;
 
     Ok(feed)
 }
@@ -144,6 +133,7 @@ pub async fn import_opml_feeds(
     feeds: Vec<crate::opml::ImportedFeed>,
 ) -> FeedResult<()> {
     let bulk_fetch = bulk_feeds(http, feeds).await?;
+    let filters = filter::load_compiled_filters(db).await?;
 
     let mut category_map: std::collections::HashMap<String, i64> =
         database::list_categories(db, database::FeedScope::All)
@@ -166,34 +156,21 @@ pub async fn import_opml_feeds(
             },
         };
 
-        let display_url = imported.display_url.unwrap_or(fetched.link);
+        let display_url = imported.display_url.unwrap_or_else(|| fetched.link.clone());
 
-        let db_feed = database::create_feed(
-            db,
-            &imported.name,
-            &imported.url,
-            &display_url,
-            category_pk,
-            None,
-            None,
-            false,
-        )
-        .await?;
-        let filters = filter::load_compiled_filters(db).await?;
-        let state = poll::after_add(
-            &db_feed,
-            fetched.validators,
-            fetched.hints,
-            crate::sync::unix_now(),
-        );
-        database::record_poll(
-            db,
-            db_feed.pk,
-            FeedStatus::Active,
-            &state,
-            &fetched.articles,
-            &filters,
-        )
+        let new = NewFeed {
+            name: &imported.name,
+            url: &imported.url,
+            display_url: &display_url,
+            category: category_pk,
+            metadata: None,
+            refresh_interval: None,
+            greader_hidden: false,
+        };
+        let now = crate::sync::unix_now();
+        database::create_feed_with_first_poll(db, &new, &fetched.articles, &filters, |feed| {
+            poll::after_add(feed, fetched.validators, fetched.hints, now)
+        })
         .await?;
     }
 
@@ -768,6 +745,52 @@ mod tests {
                 "{url:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn create_adds_nothing_if_its_articles_cannot_be_stored() {
+        use axum::{Router, routing::get};
+
+        // Both feeds serve the same article URL under different guids, and
+        // article URLs are unique.
+        let item = |guid: &'static str| {
+            format!(
+                r#"<rss version="2.0"><channel>
+                    <title>Feed</title>
+                    <link>https://example.com</link>
+                    <item>
+                        <guid>{guid}</guid>
+                        <link>https://example.com/shared</link>
+                        <pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate>
+                    </item>
+                </channel></rss>"#
+            )
+        };
+        let app = Router::new()
+            .route("/a", get(move || async move { item("a") }))
+            .route("/b", get(move || async move { item("b") }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let db = test_db().await;
+
+        create_feed_with_articles(&db, &client, &format!("{base}/a"), Default::default())
+            .await
+            .unwrap();
+        let result =
+            create_feed_with_articles(&db, &client, &format!("{base}/b"), Default::default()).await;
+
+        assert!(matches!(
+            result,
+            Err(FeedError::Db(DbError::AlreadyExists(_)))
+        ));
+        let feeds = database::list_feeds(&db, database::FeedScope::All)
+            .await
+            .unwrap();
+        assert_eq!(feeds.len(), 1);
+
+        server.abort();
     }
 
     #[tokio::test]
