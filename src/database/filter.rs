@@ -2,7 +2,7 @@ use super::{Article, Db, DbResult};
 use crate::filter::{self, CompiledFilter};
 use schemars::JsonSchema;
 use serde::Serialize;
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Filter {
@@ -46,7 +46,8 @@ pub async fn create_filter(
     // caller gets an ordinary error instead of a panic.
     let compiled = filter::compile_filter(&row, feeds)?;
     let articles = super::list_all_articles(db).await?;
-    record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
+    let mut conn = db.write.acquire().await?;
+    record_filter_matches(&mut conn, &articles, std::slice::from_ref(&compiled)).await?;
 
     Ok(row)
 }
@@ -129,7 +130,8 @@ pub async fn update_filter(db: &Db, pk: i64, fields: UpdateFilterFields) -> DbRe
         let compiled = filter::compile_filter(&row, feeds)?;
         clear_matches_for_filter(db, pk).await?;
         let articles = super::list_all_articles(db).await?;
-        record_filter_matches(db, &articles, std::slice::from_ref(&compiled)).await?;
+        let mut conn = db.write.acquire().await?;
+        record_filter_matches(&mut conn, &articles, std::slice::from_ref(&compiled)).await?;
     }
 
     Ok(row)
@@ -193,7 +195,10 @@ pub async fn clear_matches_for_filter(db: &Db, filter_pk: i64) -> DbResult<()> {
     Ok(())
 }
 
-pub async fn clear_matches_for_articles(db: &Db, article_pks: &[i64]) -> DbResult<()> {
+pub(super) async fn clear_matches_for_articles(
+    conn: &mut SqliteConnection,
+    article_pks: &[i64],
+) -> DbResult<()> {
     if article_pks.is_empty() {
         return Ok(());
     }
@@ -207,7 +212,7 @@ pub async fn clear_matches_for_articles(db: &Db, article_pks: &[i64]) -> DbResul
     }
     qb.push(")");
 
-    qb.build().execute(&db.write).await?;
+    qb.build().execute(&mut *conn).await?;
 
     Ok(())
 }
@@ -229,8 +234,8 @@ pub async fn list_articles_matched_by_filter(db: &Db, filter_pk: i64) -> DbResul
     Ok(articles)
 }
 
-pub async fn record_filter_matches(
-    db: &Db,
+pub(super) async fn record_filter_matches(
+    conn: &mut SqliteConnection,
     articles: &[Article],
     filters: &[CompiledFilter],
 ) -> DbResult<()> {
@@ -251,7 +256,7 @@ pub async fn record_filter_matches(
         b.push_bind(article_pk).push_bind(filter_pk);
     });
 
-    qb.build().execute(&db.write).await?;
+    qb.build().execute(&mut *conn).await?;
 
     Ok(())
 }

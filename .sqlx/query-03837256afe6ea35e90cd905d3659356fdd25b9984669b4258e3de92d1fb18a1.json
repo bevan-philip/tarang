@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE feed\n           SET url = ?,\n               status = ?,\n               failure_count = ?,\n               last_error = ?,\n               last_refresh = ?,\n               next_poll_at = ?,\n               etag = ?,\n               last_modified = ?,\n               ttl_secs = ?,\n               skip_hours = ?,\n               skip_days = ?,\n               moved_from = ?,\n               redirected_to = ?\n           WHERE pk = ? AND status = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "03837256afe6ea35e90cd905d3659356fdd25b9984669b4258e3de92d1fb18a1"
+}

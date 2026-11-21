@@ -1,6 +1,9 @@
-use super::{Db, DbResult, FeedScope};
+use super::{Db, DbError, DbResult, FeedScope, ParsedArticle, insert_articles};
+use crate::filter::CompiledFilter;
+use crate::poll::PollState;
 use schemars::JsonSchema;
 use serde::Serialize;
+use sqlx::SqliteConnection;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, sqlx::Type, Serialize, JsonSchema)]
 #[sqlx(rename_all = "snake_case")]
@@ -176,14 +179,49 @@ pub async fn update_feed_last_refresh(
     Ok(())
 }
 
-pub async fn record_poll(db: &Db, pk: i64, state: &crate::poll::PollState) -> DbResult<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollWrite {
+    Recorded,
+    // The feed was paused or deleted while it was being polled.
+    FeedChanged,
+    // Another feed already has the URL this feed moved to.
+    UrlTaken,
+}
+
+// Writes a poll and the articles it fetched in one transaction, while the
+// feed still has the status it was polled with.
+pub async fn record_poll(
+    db: &Db,
+    pk: i64,
+    expected: FeedStatus,
+    state: &PollState,
+    articles: &[ParsedArticle],
+    filters: &[CompiledFilter],
+) -> DbResult<PollWrite> {
+    let mut tx = db.write.begin_with("BEGIN IMMEDIATE").await?;
+    match write_poll_state(&mut tx, pk, expected, state).await {
+        Ok(true) => {}
+        Ok(false) => return Ok(PollWrite::FeedChanged),
+        Err(DbError::AlreadyExists(_)) => return Ok(PollWrite::UrlTaken),
+        Err(e) => return Err(e),
+    }
+    insert_articles(&mut tx, pk, articles, filters).await?;
+    tx.commit().await?;
+    Ok(PollWrite::Recorded)
+}
+
+async fn write_poll_state(
+    conn: &mut SqliteConnection,
+    pk: i64,
+    expected: FeedStatus,
+    state: &PollState,
+) -> DbResult<bool> {
     let skip_hours = state.hints.skip_hours_text();
     let skip_days = state.hints.skip_days_text();
-    sqlx::query!(
+    let result = sqlx::query!(
         r#"UPDATE feed
            SET url = ?,
-               status = CASE WHEN status IN ('paused', 'too_many_errors', 'gone', 'duplicate')
-                             THEN status ELSE ? END,
+               status = ?,
                failure_count = ?,
                last_error = ?,
                last_refresh = ?,
@@ -195,7 +233,7 @@ pub async fn record_poll(db: &Db, pk: i64, state: &crate::poll::PollState) -> Db
                skip_days = ?,
                moved_from = ?,
                redirected_to = ?
-           WHERE pk = ?"#,
+           WHERE pk = ? AND status = ?"#,
         state.url,
         state.status,
         state.failure_count,
@@ -210,11 +248,12 @@ pub async fn record_poll(db: &Db, pk: i64, state: &crate::poll::PollState) -> Db
         state.moved_from,
         state.redirected_to,
         pk,
+        expected,
     )
-    .execute(&db.write)
+    .execute(conn)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 pub async fn set_feed_disabled(db: &Db, pk: i64, disabled: bool) -> DbResult<()> {

@@ -1,10 +1,8 @@
-use crate::database::{
-    self, Db, DbError, DbResult, Feed, list_feeds_due_for_refresh_at, record_poll,
-};
+use crate::database::{Db, DbResult, Feed, PollWrite, list_feeds_due_for_refresh_at, record_poll};
 use crate::feed::log_skipped;
 use crate::filter::{self, CompiledFilter};
 use crate::http;
-use crate::poll::{self, Fetch, Validators};
+use crate::poll::{self, Fetch, PollState, Validators};
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -69,34 +67,37 @@ async fn poll_feed(
         .map_err(|e| http::describe_error(&e));
     let outcome = poll::interpret(&response, now);
 
-    let moved_to_taken = match &outcome.moved_to {
-        Some(url) => database::get_feed_by_url(db, url)
-            .await?
-            .is_some_and(|other| other.pk != feed.pk),
-        None => false,
-    };
-    let update = poll::next_state(feed, &outcome, moved_to_taken, now);
-
-    if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch
-        && !update.status.is_disabled()
-    {
-        log_skipped(&parsed.skipped);
-        database::create_articles(db, feed.pk, &parsed.articles, filters).await?;
+    let mut state = poll::next_state(feed, &outcome, false, now);
+    let mut written = record(db, feed, &outcome, &state, filters).await?;
+    if written == PollWrite::UrlTaken {
+        state = poll::next_state(feed, &outcome, true, now);
+        written = record(db, feed, &outcome, &state, filters).await?;
+    }
+    if written != PollWrite::Recorded {
+        return Ok(None);
     }
 
-    // Another feed may have moved to the same URL since the check above.
-    let update = match record_poll(db, feed.pk, &update).await {
-        Err(DbError::AlreadyExists(_)) if update.url != feed.url => {
-            let update = poll::next_state(feed, &outcome, true, now);
-            record_poll(db, feed.pk, &update).await?;
-            update
-        }
-        result => {
-            result?;
-            update
-        }
+    if let Fetch::Updated { feed: parsed, .. } = &outcome.fetch
+        && !state.status.is_disabled()
+    {
+        log_skipped(&parsed.skipped);
+    }
+    Ok(state.last_error)
+}
+
+// The fetched articles are stored with the poll, unless it disables the feed.
+async fn record(
+    db: &Db,
+    feed: &Feed,
+    outcome: &poll::Outcome,
+    state: &PollState,
+    filters: &[CompiledFilter],
+) -> DbResult<PollWrite> {
+    let articles = match &outcome.fetch {
+        Fetch::Updated { feed: parsed, .. } if !state.status.is_disabled() => &parsed.articles[..],
+        _ => &[],
     };
-    Ok(update.last_error)
+    record_poll(db, feed.pk, feed.status, state, articles, filters).await
 }
 
 pub fn unix_now() -> i64 {
@@ -408,6 +409,40 @@ mod tests {
         assert_eq!(stored.status, FeedStatus::Active);
         assert_eq!(stored.failure_count, 0);
         assert_eq!(stored.next_poll_at, None);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_feed_paused_during_its_poll_stays_paused() {
+        let db = test_db().await;
+        let handler_db = db.clone();
+        let app = Router::new().route(
+            "/feed",
+            get(move || {
+                let db = handler_db.clone();
+                async move {
+                    crate::database::set_feed_disabled(&db, 1, true)
+                        .await
+                        .unwrap();
+                    RSS
+                }
+            }),
+        );
+        let (base, server) = serve(app).await;
+        let feed = add_feed(&db, &format!("{base}/feed")).await;
+        assert_eq!(feed.pk, 1);
+
+        sync_feeds_at(&db, &client(), 1000).await.unwrap();
+
+        let stored = list_feed(&db, feed.pk).await.unwrap().unwrap();
+        assert_eq!(stored.status, FeedStatus::Paused);
+        assert_eq!(stored.last_refresh, None);
+        let (articles,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM article")
+            .fetch_one(&db.read)
+            .await
+            .unwrap();
+        assert_eq!(articles, 0);
 
         server.abort();
     }

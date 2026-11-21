@@ -3,7 +3,7 @@ use crate::filter::CompiledFilter;
 use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Serialize;
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::{QueryBuilder, Sqlite, SqliteConnection};
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, JsonSchema)]
 pub struct Article {
@@ -29,6 +29,15 @@ pub struct ParsedArticle {
 
 pub async fn create_articles(
     db: &Db,
+    feed_pk: i64,
+    articles: &[ParsedArticle],
+    filters: &[CompiledFilter],
+) -> DbResult<Vec<Article>> {
+    insert_articles(&mut *db.write.acquire().await?, feed_pk, articles, filters).await
+}
+
+pub(super) async fn insert_articles(
+    conn: &mut SqliteConnection,
     feed_pk: i64,
     articles: &[ParsedArticle],
     filters: &[CompiledFilter],
@@ -62,14 +71,14 @@ pub async fn create_articles(
             RETURNING pk, feed, url, guid, title, content, summary, published_at, retrieved_at"#,
     );
 
-    let inserted = qb.build_query_as::<Article>().fetch_all(&db.write).await?;
+    let inserted = qb.build_query_as::<Article>().fetch_all(&mut *conn).await?;
 
     // Recompute (not append): ON CONFLICT means a "new" row may be a
     // re-fetch whose content changed, so a previously-matched article that
     // no longer matches must not stay hidden.
     let pks: Vec<i64> = inserted.iter().map(|a| a.pk).collect();
-    clear_matches_for_articles(db, &pks).await?;
-    record_filter_matches(db, &inserted, filters).await?;
+    clear_matches_for_articles(conn, &pks).await?;
+    record_filter_matches(conn, &inserted, filters).await?;
 
     Ok(inserted)
 }

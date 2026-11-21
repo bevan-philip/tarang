@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::database;
 use crate::database::Db;
 use crate::database::DbError;
+use crate::database::FeedStatus;
 use crate::database::ParsedArticle;
 use crate::filter;
 use crate::http;
@@ -97,16 +98,19 @@ pub async fn create_feed_with_articles(
     )
     .await?;
     let filters = filter::load_compiled_filters(db).await?;
-    database::create_articles(db, feed.pk, &fetched.articles, &filters).await?;
+    let state = poll::after_add(
+        &feed,
+        fetched.validators,
+        fetched.hints,
+        crate::sync::unix_now(),
+    );
     database::record_poll(
         db,
         feed.pk,
-        &poll::after_add(
-            &feed,
-            fetched.validators,
-            fetched.hints,
-            crate::sync::unix_now(),
-        ),
+        FeedStatus::Active,
+        &state,
+        &fetched.articles,
+        &filters,
     )
     .await?;
 
@@ -176,16 +180,19 @@ pub async fn import_opml_feeds(
         )
         .await?;
         let filters = filter::load_compiled_filters(db).await?;
-        database::create_articles(db, db_feed.pk, &fetched.articles, &filters).await?;
+        let state = poll::after_add(
+            &db_feed,
+            fetched.validators,
+            fetched.hints,
+            crate::sync::unix_now(),
+        );
         database::record_poll(
             db,
             db_feed.pk,
-            &poll::after_add(
-                &db_feed,
-                fetched.validators,
-                fetched.hints,
-                crate::sync::unix_now(),
-            ),
+            FeedStatus::Active,
+            &state,
+            &fetched.articles,
+            &filters,
         )
         .await?;
     }
